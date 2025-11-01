@@ -1330,7 +1330,9 @@ def calc_ground_depth(hfov_degs,
     Y = (yg - cy) / f
     Z = np.ones_like(X)
     norm = np.sqrt(X**2 + Y**2 + Z**2)
-    dirs_cam = np.stack([X / norm, Y / norm, Z / norm], axis=-1)
+    # dirs_cam = np.stack([X / norm, Y / norm, Z / norm], axis=-1)
+    dirs = np.stack([X / norm, Y / norm, Z / norm], axis=-1)
+    dirs_nwu = dirs @ p.getCAM2NWU().T
 
     # # --- 3) camera  ->  NED -------------------------------------------
     # Ry90neg = np.array([[ 0, 0, 1],
@@ -1347,7 +1349,7 @@ def calc_ground_depth(hfov_degs,
     #                [ 0,                  1,  0               ],
     #                [ np.sin(-pitch_rad), 0,  np.cos(-pitch_rad)]])
     # dirs_ = dirs_ned @ Ry.T                     # final unit directions
-    dirs = dirs_cam @ (rotation_matrix_x(np.pi).T @ p.getCAM2NWU().T)
+    # dirs = dirs_cam @ (rotation_matrix_x(np.pi).T @ p.getCAM2NWU().T)
 
     # --- 5) ray pitch angle & ground intersection --------------------
     horiz_len     = np.linalg.norm(dirs[..., :2], axis=-1)

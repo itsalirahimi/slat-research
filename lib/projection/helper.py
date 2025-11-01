@@ -10,46 +10,60 @@ import numpy as np
 from .config import Scaling
 import cv2
 
-NULL_SCALE_MIN_Z = -30.0
+NULL_SCALE_MIN_Z = 30.0
 
-def calc_scale_factor(desired_altitude, scaling, pc_to_be_rescaled=None, bgz=None):
+def calc_scale_factor(desired_alt, scaling, pc_to_be_rescaled=None, bgz=None):
     if scaling == Scaling.NULL:
         assert pc_to_be_rescaled is not None
         min_z = np.nanmin(pc_to_be_rescaled[:,:,2])
-        return NULL_SCALE_MIN_Z / min_z
+        ret = abs(NULL_SCALE_MIN_Z / min_z)
     elif scaling == Scaling.MIN_Z:
         assert pc_to_be_rescaled is not None
         min_z = np.nanmin(pc_to_be_rescaled[:,:,2])
-        return desired_altitude / min_z
+        ret = desired_alt / min_z
     elif scaling == Scaling.MEAN_Z:
         assert bgz is not None, "MEAN_Z Scaling requires bgz provided"
         mean_z = np.mean(bgz)
-        return desired_altitude / mean_z
+        ret = desired_alt / mean_z
     elif scaling == Scaling.RESHAPE_BG_Z:
         assert bgz is not None, "RESHAPE_BG_Z Scaling requires bgz provided" 
+    # assert ret > False, "Inconsistent z-axis direction in scale factor calculation"
+    # assert ret > 0, f"Invalid scale factor: {ret:.4f}"
+    # return abs(ret)
+    return ret
 
-def project3D(depth_img, pose, hfov_deg, scaling, bg=None, 
-              move=False, pyramidProj=False, do_rotate=True):
-    pc, dirs = depthImage2pointCloud(depth_img, hfov_deg, pose, pyramidProj=pyramidProj,
-                                     do_rotate=do_rotate)
-    scale_factor = calc_scale_factor(-abs(pose.p6.z), scaling, bgz=bg, pc_to_be_rescaled=pc)
-    pc, dirs = depthImage2pointCloud(depth_img, hfov_deg, pose, scale_factor=scale_factor, 
-                                     pyramidProj=pyramidProj, do_rotate=do_rotate)
-    if move:
-        p = np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]])
-        move_const = p.T
-        pc += move_const
-    else:
-        move_const = None
-    return pc, move_const
+def computeGeps(shape, hfov_deg, pose):
+    """
+    Summary:
+    - Camera at origin.
+    - Intersect NWU rays with plane z=altitude.
+    - Require do_rotate=True; pass None to calcCameraDirs.
+    - Assert all rays intersect in front; return (H,W,3) float32 xyz_image.
+    """
+    # Get NWU-frame direction vectors for each pixel
+    dirs = calcCameraDirs(shape, hfov_deg, False, pose, True)  # (H, W, 3)
 
-def depthImage2pointCloud(D, horizontal_fov, p, scale_factor = 1, 
-                          pyramidProj=False, do_rotate=True):
-    """
-    Computes a point cloud from a depth image 
-    """
-    H, W = D.shape
-    hfov_rad = np.radians(horizontal_fov)
+    # Intersection: r(t)=t*d with plane z=altitude -> t = altitude / d_z
+    dz = dirs[..., 2]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        t = (-pose.p6.z) / dz
+
+    # Valid: not parallel, finite, and in front
+    valid = np.isfinite(t) & (dz != 0) & (t > 0)
+    if not np.all(valid):
+        n_bad = int(t.size - np.count_nonzero(valid))
+        raise AssertionError(
+            f"{n_bad} ray(s) do not intersect z={-pose.p6.z} in front; for now we have no support for this."
+        )
+
+    # XYZ image; snap z to altitude
+    xyz_image = (t[..., None] * dirs).astype(np.float32, copy=False)
+    xyz_image[..., 2] = np.float32(-pose.p6.z)
+    return xyz_image
+
+def calcCameraDirs(shape, hfov_deg, pyramidProj, pose, do_rotate):
+    H, W = shape
+    hfov_rad = np.radians(hfov_deg)
     focal_length = (W / 2) / np.tan(hfov_rad / 2)
     cx, cy = W / 2, H / 2
     # Generate direction vectors in camera frame
@@ -65,13 +79,35 @@ def depthImage2pointCloud(D, horizontal_fov, p, scale_factor = 1,
     dirs = np.stack((X, Y, Z), axis=-1)  # (H, W, 3)
     if do_rotate:
         # Rotate direction vectors into NWU frame
-        dirs_nwu = dirs @ p.getCAM2NWU().T
+        return dirs @ pose.getCAM2NWU().T
     else:
-        dirs_nwu = dirs
+        return dirs
+
+def project3D(depth_img, pose, hfov_deg, scaling, bg=None, 
+              move=False, pyramidProj=False, do_rotate=True):
+    dirs = calcCameraDirs(depth_img.shape, hfov_deg, pyramidProj, pose, do_rotate)
     # Scale by depth and altitude
-    D2 = D * scale_factor
-    pc1 = dirs_nwu * (D2[..., np.newaxis])
-    return pc1, dirs_nwu
+    pc = dirs * (depth_img[..., np.newaxis])
+    # if do_rotate:
+    #     sgn = -1
+    # else:
+    #     sgn = 1
+    scale_factor = calc_scale_factor(pose.p6.z, scaling, bgz=bg, pc_to_be_rescaled=pc)
+    pc *= scale_factor
+    if move:
+        pose = np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]])
+        move_const = pose.T
+        pc += move_const
+    else:
+        move_const = None
+    return pc, move_const
+
+# def depthImage2pointCloud(D, horizontal_fov, p, scale_factor = 1, 
+#                           pyramidProj=False, do_rotate=True):
+#     """
+#     Computes a point cloud from a depth image 
+#     """
+    
 
 def transform_depth(depth_image, bg_image, gep_image):
     assert depth_image.dtype == np.float32 and bg_image.dtype == np.float32 and \
@@ -148,18 +184,3 @@ def resize_keep_ar(img, desired_width):
     new_height = int(desired_width * aspect_ratio)
     resized = cv2.resize(img, (desired_width, new_height), interpolation=cv2.INTER_AREA)
     return resized
-
-
-
-# def project3DAndScale2(depth_img, pose, hfov_deg, shape):
-#     pc, dirs = depthImage2pointCloud(depth_img, roll_rad=pose._roll_rad, 
-#                                      pitch_rad=pose._pitch_rad, yaw_rad=pose._yaw_rad,
-#                                      horizontal_fov=hfov_deg)
-#     gpc = np.ones(shape).astype(np.float32) * (-abs(pose.z))
-#     scale_factor = calc_scale_factor(gpc, pc)
-#     pc_scaled, dirs = depthImage2pointCloud(depth_img, roll_rad=pose._roll_rad, 
-#                                             pitch_rad=pose._pitch_rad, yaw_rad=pose._yaw_rad,
-#                                     horizontal_fov=hfov_deg, scale_factor=scale_factor)
-#     return pc_scaled
-
-

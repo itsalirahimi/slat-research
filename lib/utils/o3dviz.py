@@ -95,3 +95,22 @@ def estimate_marker_radius(mesh: o3d.geometry.TriangleMesh, points: np.ndarray) 
     if not np.isfinite(diag) or diag <= 0:
         return 1e-2
     return float(0.01 * diag)  # 1% of scene diagonal
+
+def viz_pcd(pcd, title="Point Cloud", point_size=3, bg_color=(0, 0, 0)):
+    if pcd.is_empty():
+        raise ValueError("pcd is empty.")
+    frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=1.0)
+    try:
+        # Newer API (Open3D ≥ 0.17)
+        o3d.visualization.draw(
+            [
+                {"name": "pcd", "geometry": pcd, "material": {"point_size": point_size}},
+                {"name": "axes", "geometry": frame},
+            ],
+            title=title,
+            bg_color=bg_color,
+        )
+    except Exception:
+        # Fallback for older Open3D
+        o3d.visualization.draw_geometries([pcd, frame], window_name=title)
+

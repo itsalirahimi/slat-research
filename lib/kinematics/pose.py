@@ -63,30 +63,36 @@ class Pose:
             self._init_from_p6(p6)
         else:
             R = extmat.data if isinstance(extmat, ExtMat) else extmat
-            self._init_from_extmat(np.asarray(R, dtype=float))
+            self._init_from_nwu2cam(np.asarray(R, dtype=float))
 
     def _init_from_p6(self, val: Point6) -> None:
         self.p6 = val
-        Ry = np.array([[ 0,  0, 1], [0, 1, 0], [-1, 0, 0]])
-        Rx = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]])
+        Ry = np.array([[ 0, 0, 1], 
+                       [0, 1, 0], 
+                       [-1, 0, 0]])
+        Rx = np.array([[1, 0, 0], 
+                       [0, 0, -1], 
+                       [0, 1, 0]])
         Rphi   = rotation_matrix_x(-val.roll_rad)
         Rtheta = rotation_matrix_y(-val.pitch_rad)
         Rpsi   = rotation_matrix_z(-val.yaw_rad)
         Rnwu   = rotation_matrix_x(np.pi)
-        rot = (Rnwu @ Rpsi @ Rtheta @ Rphi @ Rx @ Ry).astype(float)
+        # rot = (Rnwu @ Rpsi @ Rtheta @ Rphi @ Rx @ Ry).astype(float)
+        rot = (Rnwu @ Rpsi @ Rtheta @ Rphi).astype(float)
         extmat = np.eye(4, dtype=float)
         extmat[:3, :3] = rot
         extmat[:3,  3] = [val.x, val.y, val.z]
         self.extmat = extmat
     
-    def _init_from_extmat(self, extmat: ExtMat) -> None:
+    def _init_from_nwu2cam(self, extmat: ExtMat) -> None:
         rot = extmat[:3, :3]
         t  = extmat[:3, 3]
         self.p6 = Point6(x=extmat[0, 3], y=extmat[1, 3], z=extmat[2, 3])
         self.extmat = rot.astype(float)
 
     def getCAM2NWU(self):
-        return self.extmat[:3, :3]
+        return (self.extmat[:3, :3]).T
     
     def getNWU2CAM(self):
-        return (self.extmat[:3, :3]).T
+        return self.extmat[:3, :3]
+    

@@ -7,6 +7,8 @@ import re
 import copy
 import numpy as np
 import open3d as o3d
+import open3d.visualization.rendering as rendering
+
 
 NAMED = {
     "r": (1, 0, 0), "red": (1, 0, 0),
@@ -145,6 +147,14 @@ def main():
     # Visualizer with custom background + point size (works across O3D versions)
     vis = o3d.visualization.Visualizer()
     vis.create_window(window_name="PCD Compare", width=1280, height=800)
+    axis = o3d.geometry.TriangleMesh.create_coordinate_frame(size=2.0)
+    def mat_mesh():
+        m = rendering.MaterialRecord()
+        m.shader = "defaultLit"
+        m.base_color = (0.7, 0.7, 0.9, 1.0)
+        m.base_roughness = 0.8
+        return m
+    vis.add_geometry(axis)
     for g in geoms:
         vis.add_geometry(g)
     opt = vis.get_render_option()

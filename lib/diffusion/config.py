@@ -4,15 +4,16 @@ import os
 @dataclass
 class BGPatternDiffuserConfig:
     hfov_deg: float 
-    output_dir: str
+    root_dir: str
+    dst_dir: str
     coarsetune_iters: int = 400
     finetune_iters: int = 800
     viz: bool = False
     coarsetune_grid_w: int = 3
     coarsetune_grid_h: int = 3
     shift_k: float = 1.2
-    finetune_grid_w: int = 7
-    finetune_grid_h: int = 7
+    finetune_grid_w: int = 8
+    finetune_grid_h: int = 8
     tunning_alpha: float = 1e-4
     fast: bool = False
     downsample_dstNum: int = 1e5
@@ -31,10 +32,9 @@ class BGPatternDiffuserConfig:
     ct1iters: int = 200
 
     def __post_init__(self):
+        self.output_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir)
         # Enforce valid verbosity value
         allowed_verbosity = ["tiny", "none", "full"]
         if self.verbosity not in allowed_verbosity:
             raise ValueError(f"Invalid verbosity value: {self.verbosity}. Allowed values are {allowed_verbosity}.")
-        self.output_dir = os.path.join(self.output_dir, "diffusion")
-
 

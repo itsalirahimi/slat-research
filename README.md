@@ -4,11 +4,35 @@
 
 ## Major Job
 ```bash
-# Diffuse a dataset in loop
-python3 launch/do_diffusion.py --dataset data/earth
+python3 launch/project.py --src data/ortholoc/metric_depth/depth_pro/ --dst test --save
+# projection
+[INPUT]: metric_depth csv files in: data/ortholoc/metric_depth/depth_pro/
+[OUTPUT]: radial pcd files in: data/ortholoc/projection/test/
 
-# Fuse a dataset in loop
-python3 launch/project_metric.py --dataset data/earth --do_fuse
+python3 launch/diffuse.py --src data/ortholoc/projection/test/ --save
+# diffusion
+[INPUT]: radial pcd files in: data/ortholoc/projection/test/
+[OUTPUT]: bg pcd files in: data/ortholoc/diffusion/test/
+
+python3 launch/fuse.py --src data/ortholoc/projection/test/ --save
+# fusion
+[INPUT]: radial pcd files in: data/ortholoc/projection/test/
+[INPUT]: bg pcd files in: data/ortholoc/diffusion/test/
+[OUTPUT]: pcd files in: data/ortholoc/fusion/test/
+```
+
+Flags with help
+```bash
+--index INDEX      Row index to use from dataset (matches 'index' column)
+--dataset DATASET  Path to the dataset directory (e.g., ../../data/e)
+--do_fuse          To perform flat ground fusion
+--show_bg          To show the background point cloud as well (don't use in case of fusion)
+--start START      Row index to start from
+--save             To save the output in a corresponding dir name
+--gt
+--on-video         Perform position translation on each projected point cloud
+--in-camera        Perform projection in all of the subroutines, in camera frame. ATTENTION: YOU MUST SET THIS FLAG BOTH IN FUSION AND DIFFUSION OTHERWISE CORRUPTED OUTPUTS!
+--pyrproj          Perform pyramid projection (this is for the cased in which we directly want to see the 3D estimation of MDE) - set False in case of foreground diffusion
 ```
 
 **Scaling Fixed**

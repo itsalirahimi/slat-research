@@ -60,15 +60,29 @@ class BGPatternDiffuser:
         print(f"[BGPatternDiffuser] ------- Initial coarse tunning done")
         return mbase, ct1
 
-    def diffuse(self, metric_depth, color_image, p, idx):
+    def diffuse(self, data, color_image, name, idx):
+        H, W = color_image.shape[:2]
+        if isinstance(data, np.ndarray):
+            assert data.shape == (H, W), "Metric Depth shape must be (H,W)"
+            rd_pcm_cam, _ = project3D(data, None, self.config.hfov_deg, move=False, 
+                                    scaling=Scaling.NULL, do_rotate=False)
+            rd_pcd_cam = pcm2pcd(rd_pcm_cam, color_image)
+        elif isinstance(data, o3d.geometry.PointCloud):
+            pts = np.asarray(data.points)
+            assert pts.ndim == 2 and pts.shape[1] == 3, "Point cloud must have shape (N, 3)."
+            N = pts.shape[0]
+            expected = H * W
+            assert pts.shape[0] == H * W, f"error: point count N={N} != H*W={expected}"
+            rd_pcd_cam = data
+        else:
+            raise ValueError("data must be o3d pcd or np array(Metric Depth)")
+
+        if self.config.downsample_dstNum != 1.0:
+            rd_pcd_cam = downsample_pcd(rd_pcd_cam, self.config.downsample_dstNum)
+        
         print(f" =============== [BGPatternDiffuser] Diffusing on index {idx}")
         t0 = time.time()
-        rd_pcm, _ = project3D(metric_depth, p, self.config.hfov_deg, move=False, scaling=Scaling.NULL)
-        rd_pcd_ = pcm2pcd(rd_pcm, color_image)
-        if self.config.downsample_dstNum != 1.0:
-            rd_pcd_ = downsample_pcd(rd_pcd_, self.config.downsample_dstNum)
-        
-        rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_)
+        rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_cam)
         rd_pcd_arr = pcd2pcdArr(rd_pcd)
 
         # -------------- Provide initial guess if does not exist
@@ -101,8 +115,8 @@ class BGPatternDiffuser:
                                                                 self.config.coarsetune_grid_h,
                                                                 self.config.spline_mesh_samples_u, 
                                                                 self.config.spline_mesh_samples_v)
+        
         print(f"[BGPatternDiffuser] ------- Iterative Coarse tunning done on index {idx}")
-
         # ================= Prepare for Fine-Tunning
         _, nonshifted_mesh, sh, shifted_mesh = compute_shifted_ctrl_points(rd_pcd_arr.copy(), 
             coarse_tunned, self.config.spline_mesh_samples_u, self.config.spline_mesh_samples_v, 1.0)
@@ -158,22 +172,21 @@ class BGPatternDiffuser:
         T_inv[:3, :3] = R.T
         T_inv[:3, 3]  = -R.T @ t
         bgpts = project_external_along_normals_noreject(rd_pcd_arr, fmesh)
-        filename1 = f"_{idx}.pcd"
-        filename = f"bg_{idx}.pcd"
-        outname1 = os.path.join(self.config.output_dir, filename1)
-        outname = os.path.join(self.config.output_dir, filename)
+        # filename1 = f"_{idx}.pcd"
+        # outname1 = os.path.join(self.config.output_dir, filename1)
         # Debug data log:
         # filename2 = f"ctrl_{idx}.csv"
         # outname2 = os.path.join(self.config.output_dir, filename2)
         # save_pcd(bgpts, np.zeros_like(np.asarray(rd_pcd.colors)), outname)
-        # save_pcd(np.asarray(rd_pcd.points), np.asarray(rd_pcd_.colors), outname1)
+        # save_pcd(np.asarray(rd_pcd.points), np.asarray(rd_pcd_cam.colors), outname1)
         # np.savetxt(outname2, fine_tunned, delimiter=',')
         # Main data log:
-        restored = apply_transform_points(bgpts, T_inv)
-        bg_pts = restored[bgmask]
-        cs = np.zeros_like(np.asarray(rd_pcd_.colors))
-        cs[:,0] = 1
-        save_pcd(restored, cs, outname)
-        # save_pcd(bg_pts, np.zeros_like(np.asarray(rd_pcd_.colors)), outname)
-        save_pcd(np.asarray(rd_pcd_.points), np.asarray(rd_pcd_.colors), outname1)
+        bg_pc_arr_cam = apply_transform_points(bgpts, T_inv)
+        bg_pts = bg_pc_arr_cam[bgmask]
+        colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
+        colors[:,0] = 1
+        outname = os.path.join(self.config.output_dir, f"{name}.pcd")
+        save_pcd(bg_pc_arr_cam, colors, outname)
+        # save_pcd(bg_pts, np.zeros_like(np.asarray(rd_pcd_cam.colors)), outname)
+        # save_pcd(np.asarray(rd_pcd_cam.points), np.asarray(rd_pcd_cam.colors), outname1)
         print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {outname}. Time: {(time.time() - t0):.2f} sec")

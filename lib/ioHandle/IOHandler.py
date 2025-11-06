@@ -4,15 +4,12 @@ import argparse
 import yaml
 from pathlib import Path
 import pandas as pd
-from kinematics.pose import ExtMat, Point6, Pose
-import cv2
 import numpy as np
 import json
 from typing import Union
 from geom.types import Background
 import open3d as o3d
 from utils.conversion import pcm2pcd
-import glob
 
 def _find_config(dataset_dir: Path) -> Path:
     """Return the path to the first existing YAML config file in dataset_dir."""
@@ -55,11 +52,11 @@ class IOHandler:
         else:
             self.dst = self.src
         
+
         self.dataset_dir = Path(self.args.src).expanduser().resolve().parent.parent
         if not self.dataset_dir.is_dir():
             print(f"Dataset directory not found: {self.dataset_dir}", file=sys.stderr)
             sys.exit(2)
-
         # Attempt to load the config.yaml file
         try:
             cfg_path = _find_config(self.dataset_dir)
@@ -110,157 +107,6 @@ class IOHandler:
                 dic = self.load_row(row) 
                 k += 1
                 yield dic
-
-class FuseIO(IOHandler):
-    def __init__(self):
-        super().__init__()
-
-    def load_row(self, row):
-        if (self.cfg["kinematics"] == "CAM2NWU"):
-            extmat_path = os.path.join(self.dataset_dir, "extmat")
-            extmat_path = os.path.join(extmat_path, row["name"] + ".json")
-            with open(extmat_path, "r") as f:
-                extmat_d = json.load(f)
-            # extmat_data = np.loadtxt(extmat_path, delimiter=',', dtype=np.float32)
-            extmat_r = extmat_d["rotation"]#.reshape(4, 4)
-            extmat_t = np.array(extmat_d["translation"])#.reshape(4, 4)
-            extmat_data = np.hstack([extmat_r, extmat_t.reshape(3,1)])
-            extmat_data = np.vstack([extmat_data, np.array([0,0,0,1]).reshape(1,4)])
-            extmat = ExtMat(data=extmat_data)
-            p = Pose(extmat=extmat)
-        
-        elif (self.cfg["kinematics"] =="pose"):
-            p6 = Point6(x=row["x"], y=row["y"], z=row["z"], 
-                        roll=row["phi"], pitch=row["theta"], yaw=row["psi"])
-            p = Pose(p6=p6)
-        
-        target_name = row["name"]
-        pattern = os.path.join(self.source_dir, f"{target_name}.*")
-        matches = glob.glob(pattern)
-
-        if not matches:
-            raise FileNotFoundError(f"No file found for name '{target_name}' in {self.source_dir}")
-
-        src_path = matches[0]
-        src_ext = os.path.splitext(src_path)[1]
-        if src_ext == ".npy":
-            src = np.load(src_path).astype(np.float32)
-        elif src_ext == ".csv":
-            src = np.loadtxt(src_path, delimiter=',', dtype=np.float32)
-        elif src_ext == ".pcd":
-            src = load_pcd(src_path)
-        else:
-            raise ValueError("Invalid filename extension")
-        
-        color_path = os.path.join(self.dataset_dir, 
-                                  "rgb", row["name"] + self.cfg["rgb_extension"])
-        color_img = cv2.imread(color_path)
-        bg = load_pcd(os.path.join(self.bgDir, f"{row['name']}.pcd"))
-        dic = {
-            "pose": p, 
-            "source": src, 
-            "image": color_img, 
-            "bg": bg,
-            "idx": row['index'],
-            "name": row["name"]
-        }
-        return dic
-
-class EvalIO(IOHandler):
-    def __init__(self):
-        super().__init__()
-
-class DiffuseIO(IOHandler):
-    def __init__(self):
-        super().__init__()
-    
-    def load_row(self, row):
-        target_name = row["name"]
-        pattern = os.path.join(self.source_dir, f"{target_name}.*")
-        matches = glob.glob(pattern)
-
-        if not matches:
-            raise FileNotFoundError(f"No file found for name '{target_name}' in {self.source_dir}")
-
-        src_path = matches[0]
-        src_ext = os.path.splitext(src_path)[1]
-
-        if src_ext == ".npy":
-            src = np.load(src_path).astype(np.float32)
-        elif src_ext == ".csv":
-            src = np.loadtxt(src_path, delimiter=',', dtype=np.float32)
-        elif src_ext == ".pcd":
-            src = load_pcd(src_path)
-        else:
-            raise ValueError("Invalid filename extension")
-        
-        color_path = os.path.join(self.dataset_dir, 
-                                  "rgb", row["name"] + self.cfg["rgb_extension"])
-        color_img = cv2.imread(color_path)
-        
-        dic = {
-            "source": src, 
-            "image": color_img, 
-            "idx": row['index'],
-            "name": row['name'],
-        }
-        return dic
-
-class ProjcetIO(IOHandler):
-    def __init__(self):
-        super().__init__()
-
-    def load_row(self, row):
-        if (self.cfg["kinematics"] == "CAM2NWU"):
-            extmat_path = os.path.join(self.dataset_dir, "extmat")
-            extmat_path = os.path.join(extmat_path, row["name"] + ".json")
-            with open(extmat_path, "r") as f:
-                extmat_d = json.load(f)
-            # extmat_data = np.loadtxt(extmat_path, delimiter=',', dtype=np.float32)
-            extmat_r = extmat_d["rotation"]#.reshape(4, 4)
-            extmat_t = np.array(extmat_d["translation"])#.reshape(4, 4)
-            extmat_data = np.hstack([extmat_r, extmat_t.reshape(3,1)])
-            extmat_data = np.vstack([extmat_data, np.array([0,0,0,1]).reshape(1,4)])
-            extmat = ExtMat(data=extmat_data)
-            p = Pose(extmat=extmat)
-        
-        elif (self.cfg["kinematics"] =="pose"):
-            p6 = Point6(x=row["x"], y=row["y"], z=row["z"], 
-                        roll=row["phi"], pitch=row["theta"], yaw=row["psi"])
-            p = Pose(p6=p6)
-        
-        target_name = row["name"]
-        pattern = os.path.join(self.source_dir, f"{target_name}.*")
-        matches = glob.glob(pattern)
-
-        if not matches:
-            raise FileNotFoundError(f"No file found for name '{target_name}' in {self.source_dir}")
-
-        src_path = matches[0]
-        src_ext = os.path.splitext(src_path)[1]
-
-        if src_ext == ".npy":
-            src = np.load(src_path).astype(np.float32)
-        elif src_ext == ".csv":
-            src = np.loadtxt(src_path, delimiter=',', dtype=np.float32)
-        elif src_ext == ".pcd":
-            src = load_pcd(src_path)
-        else:
-            raise ValueError("Invalid filename extension")
-        
-        color_path = os.path.join(self.dataset_dir, 
-                                  "rgb", row["name"] + self.cfg["rgb_extension"])
-        color_img = cv2.imread(color_path)
-
-        dic = {
-            "pose": p, 
-            "source": src, 
-            "image": color_img,
-            "idx": row['index'],
-            "name": row["name"]
-        }
-        return dic
-
 
 ArrayLike = Union[np.ndarray, list, tuple]
 

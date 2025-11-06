@@ -2,6 +2,9 @@
 from enum import Enum, auto
 from dataclasses import dataclass
 import os
+from pathlib import Path
+
+def ensure_dir(p): Path(p).mkdir(parents=True, exist_ok=True)
 
 class Scaling(Enum):
     NULL = 0
@@ -28,10 +31,14 @@ class Mapper3DConfig:
     do_save: bool = None
     on_video: bool = False
     in_camera: bool = False
-    pyramidProj: bool = False
+    downsample_pts: int = 100000
 
     def __post_init__(self):
-        self.output_dir = os.path.join(self.root_dir, "projection", self.dst_dir)
+        self.output_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "radial")
+        self.rgb_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "rgb")
+        self.can_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "canonical")
+        ensure_dir(self.output_dir)
+        ensure_dir(self.rgb_dir)
         if self.on_video:
             self.visMode = VisMode.MAccum
 

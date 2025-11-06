@@ -3,7 +3,7 @@ import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
 
-from utils.io import FuseIO
+from ioHandle.FuseIO import FuseIO
 from fusion.fusion import BGPatternFuser
 from fusion.config import BGPatternFuserConfig
 

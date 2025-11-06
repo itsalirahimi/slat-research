@@ -4,7 +4,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
 
 from projection.mapper3D import Mapper3D, Mapper3DConfig
-from utils.io import ProjcetIO
+from ioHandle.ProjcetIO import ProjcetIO
 
 def main():
     io = ProjcetIO()

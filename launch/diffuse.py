@@ -3,7 +3,7 @@ import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
 from diffusion.diffusion import BGPatternDiffuser, BGPatternDiffuserConfig
-from utils.io import DiffuseIO
+from ioHandle.DiffuseIO import DiffuseIO
 
 def main():
     io = DiffuseIO()
@@ -18,7 +18,7 @@ def main():
     
     for dict in io.load():
         diffuser.diffuse(dict["source"], 
-                         dict["image"], 
+                         dict["image"],
                          dict["name"],
                          dict["idx"]
                          )

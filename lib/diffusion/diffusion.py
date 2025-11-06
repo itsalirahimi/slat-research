@@ -1,3 +1,4 @@
+import cv2
 import open3d as o3d
 import numpy as np
 import os
@@ -13,12 +14,11 @@ from .tunning import Optimizer
 from .scoring import Projection3DScorer
 from .config import BGPatternDiffuserConfig
 from .helper import RandomSurfacer, compute_shifted_ctrl_points, \
-    create_grid_on_surface
-from geom.clouds import downsample_pcd
+    create_grid_on_surface, mask2image
 from utils.o3dviz import visualize_spline_mesh
 import time
 from kinematics.clouds import orient_point_cloud_cgplane_global, apply_transform_points
-from utils.io import save_pcd
+from ioHandle.IOHandler import save_pcd
 from projection.config import Scaling
 from geom.surfaces import filter_mesh_neighbors
 
@@ -60,26 +60,8 @@ class BGPatternDiffuser:
         print(f"[BGPatternDiffuser] ------- Initial coarse tunning done")
         return mbase, ct1
 
-    def diffuse(self, data, color_image, name, idx):
-        H, W = color_image.shape[:2]
-        if isinstance(data, np.ndarray):
-            assert data.shape == (H, W), "Metric Depth shape must be (H,W)"
-            rd_pcm_cam, _ = project3D(data, None, self.config.hfov_deg, move=False, 
-                                    scaling=Scaling.NULL, do_rotate=False)
-            rd_pcd_cam = pcm2pcd(rd_pcm_cam, color_image)
-        elif isinstance(data, o3d.geometry.PointCloud):
-            pts = np.asarray(data.points)
-            assert pts.ndim == 2 and pts.shape[1] == 3, "Point cloud must have shape (N, 3)."
-            N = pts.shape[0]
-            expected = H * W
-            assert pts.shape[0] == H * W, f"error: point count N={N} != H*W={expected}"
-            rd_pcd_cam = data
-        else:
-            raise ValueError("data must be o3d pcd or np array(Metric Depth)")
-
-        if self.config.downsample_dstNum != 1.0:
-            rd_pcd_cam = downsample_pcd(rd_pcd_cam, self.config.downsample_dstNum)
-        
+    def diffuse(self, data, cimg, name, idx):
+        rd_pcd_cam = data
         print(f" =============== [BGPatternDiffuser] Diffusing on index {idx}")
         t0 = time.time()
         rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_cam)
@@ -185,8 +167,10 @@ class BGPatternDiffuser:
         bg_pts = bg_pc_arr_cam[bgmask]
         colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
         colors[:,0] = 1
-        outname = os.path.join(self.config.output_dir, f"{name}.pcd")
-        save_pcd(bg_pc_arr_cam, colors, outname)
-        # save_pcd(bg_pts, np.zeros_like(np.asarray(rd_pcd_cam.colors)), outname)
-        # save_pcd(np.asarray(rd_pcd_cam.points), np.asarray(rd_pcd_cam.colors), outname1)
-        print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {outname}. Time: {(time.time() - t0):.2f} sec")
+        _filename_diffusion = os.path.join(self.config.output_dir, f"{name}.pcd")
+        _filename_mask = os.path.join(self.config.mask_dir, f"{name}.png")
+        save_pcd(bg_pc_arr_cam, colors, _filename_diffusion)
+        H, W, _ = cimg.shape
+        mask = mask2image(bgmask, H, W)
+        cv2.imwrite(_filename_mask, mask)
+        print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {_filename_diffusion}. Time: {(time.time() - t0):.2f} sec")

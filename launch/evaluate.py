@@ -3,7 +3,7 @@ import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
 from projection.mapper3D import Evaluator3D
-from utils.io import IOHandler
+from ioHandle.IOHandler import IOHandler
 
 def main():
     io = IOHandler(True)

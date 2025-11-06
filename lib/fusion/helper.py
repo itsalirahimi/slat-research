@@ -1,12 +1,13 @@
-import numpy as np
 import os, sys
+import math, time
+from typing import Optional, Tuple
 
-from kinematics.transformations import rotation_matrix_x
-from utils.conversion import pcm2pcd
+from utils.conversion import pcd2pcm, pcm2pcd
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/..")
 from kinematics.pose import Pose
 import open3d as o3d
+import numpy as np
 
 from types import SimpleNamespace
 from scipy.interpolate import CubicSpline, LinearNDInterpolator
@@ -1165,7 +1166,7 @@ def visualize_scene_borders(pcd, cg, surface_interior_cg, items, red_points_by_s
         width=1400, height=900
     )
 
-def unfold_surface(xyz_img,
+def unfold_surface_old(xyz_img,
                    hfov_deg: float = 66.0,
                    pose_kwargs=None):
     """
@@ -1450,19 +1451,18 @@ def rescale_depth(depth_image, bg_image, pitch):
         raise ValueError("Non-logical ratio calculation")
     return final_f, gep_f
 
-def unfold_depth(dpc, bpc, gpc):
-    nan_indices = np.argwhere(np.isnan(bpc).any(axis=2))
-    dpc_pcd = pcm2pcd(dpc)
-    bpc_pcd = pcm2pcd(bpc)
+def unfold_depth(dpc, bpc_pcd, gpc, H, W):
+    bpc = pcd2pcm(bpc_pcd, H, W)
     gpc_pcd = pcm2pcd(gpc)
     if len(bpc_pcd.points) == 0:
         raise ValueError("bpc_pcd is empty, cannot proceed.")
     bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
-    bpc_pcd = bpc_pcd.voxel_down_sample(0.02)
+    # bpc_pcd = bpc_pcd.voxel_down_sample(0.02)
     gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
-    gpc_pcd = gpc_pcd.voxel_down_sample(0.02)
+    # gpc_pcd = gpc_pcd.voxel_down_sample(0.02)
     proj_b = project_points_multi_fast(bpc_pcd, dpc, k=8, just_proj=True)
-    proj_g, _ = unfold_surface(bpc, hfov_deg=80.0)
+    proj_g_pcd = unfold_surface(bpc_pcd)
+    proj_g = pcd2pcm(proj_g_pcd, H, W)
     proj_b_idx = map_pc_proj_to_index(proj_b, bpc) # H * W * 2
     proj_b_idx_i = np.int32(proj_b_idx)
     dist = euclidean_distance_map(dpc, proj_b)     # H * W * 1
@@ -1471,7 +1471,7 @@ def unfold_depth(dpc, bpc, gpc):
         for j in range(dpc.shape[1]):
             unfolded_dpc[i, j, 0] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 0]
             unfolded_dpc[i, j, 1] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 1]
-    nan_indices = np.argwhere(np.isnan(unfolded_dpc).any(axis=2))
+            unfolded_dpc[i, j, 2] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 2] + dist[i,j,0]
     return unfolded_dpc
 
 def map_pc_proj_to_index(pc_proj: np.ndarray, pc: np.ndarray, k: int = 3) -> np.ndarray:
@@ -1619,3 +1619,321 @@ def downsample_pcm(pcm: np.ndarray, W_final: int) -> np.ndarray:
     pcm_down = cv2.resize(pcm, (W_final, H_final), interpolation=cv2.INTER_AREA)
 
     return pcm_down
+
+
+
+def _kdt_from_points(pts: np.ndarray) -> o3d.geometry.KDTreeFlann:
+    pc = o3d.geometry.PointCloud()
+    pc.points = o3d.utility.Vector3dVector(pts.astype(np.float64, copy=False))
+    return o3d.geometry.KDTreeFlann(pc)
+
+def _scene_diag(pts: np.ndarray) -> float:
+    a, b = pts.min(axis=0), pts.max(axis=0)
+    return float(np.linalg.norm(b - a))
+
+def _pick_minz_index(pts: np.ndarray, z_eps: float, rng: np.random.Generator) -> int:
+    z = pts[:, 2]
+    finite = np.isfinite(z)
+    if not np.any(finite):
+        raise ValueError("All Z values are non-finite.")
+    min_z = np.min(z[finite])
+    cand = np.flatnonzero(finite & (z <= min_z + z_eps))
+    return int(rng.choice(cand))
+
+def _nearest_in_full_cloud(pts: np.ndarray, query_idx: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    For each q in query_idx, return (parent_index, distance) where parent is the nearest neighbor
+    in the FULL set (excluding q when possible). If only itself is found, parent=-1, distance=-1.0.
+    """
+    parents = np.full(query_idx.size, -1, dtype=int)
+    dists   = np.full(query_idx.size, -1.0, dtype=float)
+    kdt_full = _kdt_from_points(pts)
+    for i, q in enumerate(query_idx):
+        ok, ids, d2s = kdt_full.search_knn_vector_3d(pts[q], 2)
+        if ok >= 2:
+            i0, i1 = int(ids[0]), int(ids[1])
+            if i0 == q:
+                parents[i] = i1
+                dists[i]   = math.sqrt(float(d2s[1]))
+            else:
+                parents[i] = i0
+                dists[i]   = math.sqrt(float(d2s[0]))
+        elif ok == 1:
+            parents[i] = -1
+            dists[i]   = -1.0
+    return parents, dists
+
+def _nearest_parent_in_frontier(pts: np.ndarray, queries: np.ndarray, frontier_idx: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """For each query (global index), pick (nearest frontier parent index, distance)."""
+    parents = np.empty(queries.size, dtype=int)
+    dists   = np.empty(queries.size, dtype=float)
+    front_pts = pts[frontier_idx]
+    kdt_front = _kdt_from_points(front_pts)
+    for i, q in enumerate(queries):
+        ok, ids, d2s = kdt_front.search_knn_vector_3d(pts[q], 1)
+        if ok:
+            parents[i] = int(frontier_idx[int(ids[0])])
+            dists[i]   = math.sqrt(float(d2s[0]))
+        else:
+            parents[i] = int(frontier_idx[0])
+            dists[i]   = float(np.linalg.norm(pts[q] - pts[parents[i]]))
+    return parents, dists
+
+def unfold_surface(
+    pcd: o3d.geometry.PointCloud,
+    *,
+    # scale-adaptive: delta = delta_scale * (max_dist_from_seed - min_dist_from_seed)
+    delta_scale: float = 1e-2,
+    # observation halo per level: obs_k = obs_mult * r_k
+    obs_mult: float = 5.0,
+    # numeric guards
+    z_eps: float = 1e-9,
+    eps_abs: float = 1e-12,
+    eps_rel: float = 1e-9,
+    seed: Optional[int] = None,
+    # copy colors/normals from the input onto the returned (moved) cloud
+    keep_colors: bool = True,
+    keep_normals: bool = False,
+    # logging
+    log_seconds: float = 1.0,   # 0 to disable periodic logs
+) -> o3d.geometry.PointCloud:
+    """
+    Unfold a point cloud onto a flat plane at Z_flat (Z of the min-Z seed), preserving point order.
+    Prints progress logs during the level growth if log_seconds > 0.
+
+    Returns:
+        open3d.geometry.PointCloud with moved points (same indexing as input).
+    """
+    if pcd.is_empty():
+        return o3d.geometry.PointCloud()
+
+    pts = np.asarray(pcd.points, dtype=np.float64)
+    assert pts.ndim == 2 and pts.shape[1] == 3, "Point cloud must be Nx3."
+    n = len(pts)
+    rng = np.random.default_rng(seed)
+
+    # ---- choose seed (min-Z) and compute Z_flat ----
+    seed_idx = _pick_minz_index(pts, z_eps, rng)
+    Z_flat = float(pts[seed_idx, 2])
+
+    # ---- compute scale-adaptive delta from seed distances ----
+    if n > 1:
+        vec = pts - pts[seed_idx]
+        dists = np.linalg.norm(vec, axis=1)
+        mask = np.ones(n, dtype=bool); mask[seed_idx] = False
+        span = float(np.max(dists[mask]) - np.min(dists[mask])) if np.any(mask) else 0.0
+    else:
+        span = 0.0
+    diag  = _scene_diag(pts)
+    delta = max(float(delta_scale) * span, float(eps_rel) * max(diag, 1.0))
+
+    # ---- level/parent/dist arrays (internal Nx3) ----
+    levels  = np.full(n, -1, dtype=int)
+    parents = np.full(n, -1, dtype=int)
+    dpar    = np.full(n, -1.0, dtype=float)
+
+    # seed: level 0, no parent
+    levels[seed_idx]  = 0
+    parents[seed_idx] = -1
+    dpar[seed_idx]    = -1.0
+    frontier = np.array([seed_idx], dtype=int)
+
+    observed_prev = np.zeros(n, dtype=bool)
+
+    # ---- logging state ----
+    t0 = time.time()
+    last_log = t0
+    def _maybe_log(level_no: int, added_dyn: int, added_forced: int, r_k_val: float):
+        nonlocal last_log
+        if log_seconds <= 0:
+            return
+        now = time.time()
+        if now - last_log >= log_seconds:
+            done = int(np.count_nonzero(levels != -1))
+            pct  = 100.0 * done / n
+            print(
+              f"[PROGRESS] level={level_no:5d} | dyn={added_dyn:5d}, forced={added_forced:5d} "
+              f"| cum={done:7d}/{n} ({pct:6.2f}%) | r_k={r_k_val:.6g} | delta={delta:.6g} | obs×={obs_mult}",
+              flush=True
+            )
+            last_log = now
+
+    level_id = 1
+    # ---------------------- main growth ----------------------
+    while np.any(levels == -1):
+        unv_mask = (levels == -1)
+        unv_idx  = np.flatnonzero(unv_mask)
+        if unv_idx.size == 0:
+            break
+
+        unv_pts = pts[unv_idx]
+        kdt_unv = _kdt_from_points(unv_pts)
+
+        # 1-NN from frontier to UNVISITED
+        nn_pairs = []  # (p_global, q_global, d2)
+        for p in frontier:
+            ok, ids, d2s = kdt_unv.search_knn_vector_3d(pts[p], 1)
+            if ok:
+                q_loc = int(ids[0])
+                nn_pairs.append((p, int(unv_idx[q_loc]), float(d2s[0])))
+
+        # Disconnected remainder: no frontier can see any unvisited
+        if not nn_pairs:
+            K = int(np.max(levels[levels >= 0])) if np.any(levels >= 0) else -1
+            disc = np.flatnonzero(levels == -1)
+            levels[disc] = K + 1
+            par_disc, dst_disc = _nearest_in_full_cloud(pts, disc)
+            parents[disc] = par_disc
+            dpar[disc]    = dst_disc
+            print(f"[WARN] Disconnected detected → assigned {disc.size} points to level {K+1} (nearest-parent in full cloud).")
+            break
+
+        # Robust dynamic radius r_k = d_min + delta (ensure strictly > d_min)
+        p_star, q_star, d2_min = min(nn_pairs, key=lambda t: t[2])
+        d_min = math.sqrt(d2_min)
+        r_k   = np.nextafter(d_min + delta, np.inf)
+        r_k2  = (r_k + eps_abs) * (r_k + eps_abs)
+
+        # Step 1) Assign level-k within r_k, keeping closest parent (and record distance)
+        best_d2 = {}  # q -> squared distance to chosen parent
+        best_p  = {}  # q -> parent index (level k-1)
+        for p in frontier:
+            ok, ids, d2s = kdt_unv.search_radius_vector_3d(pts[p], r_k + eps_abs)
+            if not ok:
+                continue
+            ids = np.asarray(ids, int); d2s = np.asarray(d2s, float)
+            for loc, d2 in zip(ids, d2s):
+                if d2 > r_k2:
+                    continue
+                q = int(unv_idx[loc])
+                if (q not in best_d2) or (d2 < best_d2[q]):
+                    best_d2[q] = d2
+                    best_p[q]  = p
+
+        added_dyn = 0
+        if best_p:
+            qs = np.fromiter(best_p.keys(), dtype=int)
+            ps = np.fromiter((best_p[q] for q in qs), dtype=int)
+            d2 = np.fromiter((best_d2[q] for q in qs), dtype=float)
+            levels[qs]  = level_id
+            parents[qs] = ps
+            dpar[qs]    = np.sqrt(d2)  # Euclidean distance already computed
+            added_dyn   = qs.size
+
+        # Witness fallback: add the global closest pair (p_star, q_star)
+        if added_dyn == 0 and levels[q_star] == -1:
+            levels[q_star]  = level_id
+            parents[q_star] = p_star
+            dpar[q_star]    = math.sqrt(d2_min)
+            added_dyn       = 1
+
+        # Step 2) Observation halo around new level-k points: obs_k = obs_mult * r_k
+        unv_mask = (levels == -1)  # refresh
+        observed_now = np.zeros(n, dtype=bool)
+        new_level_idx = np.flatnonzero(levels == level_id)
+        if new_level_idx.size > 0 and np.any(unv_mask):
+            obs_k  = float(obs_mult) * r_k
+            obs_k2 = (obs_k + eps_abs) * (obs_k + eps_abs)
+            unv_idx2 = np.flatnonzero(unv_mask)
+            unv_pts2 = pts[unv_idx2]
+            kdt_unv2 = _kdt_from_points(unv_pts2)
+            for q in new_level_idx:
+                ok, ids, d2s = kdt_unv2.search_radius_vector_3d(pts[q], obs_k + eps_abs)
+                if ok:
+                    ids = np.asarray(ids, int); d2s = np.asarray(d2s, float)
+                    m = d2s <= obs_k2
+                    if np.any(m):
+                        observed_now[unv_idx2[ids[m]]] = True
+
+        # Step 3) Force dropouts: previously observed, now not observed, and still un-leveled
+        drop_idx = np.flatnonzero((observed_prev) & (~observed_now) & (levels == -1))
+        added_forced = 0
+        if drop_idx.size > 0:
+            par_idx, par_dist = _nearest_parent_in_frontier(pts, drop_idx, frontier)
+            levels[drop_idx]  = level_id
+            parents[drop_idx] = par_idx
+            dpar[drop_idx]    = par_dist
+            added_forced      = drop_idx.size
+
+        # Log this level’s progress
+        _maybe_log(level_id, added_dyn, added_forced, r_k)
+
+        # If nothing added (extremely rare after witness), mark the rest as disconnected
+        if (added_dyn + added_forced) == 0:
+            K = int(np.max(levels[levels >= 0])) if np.any(levels >= 0) else -1
+            disc = np.flatnonzero(levels == -1)
+            levels[disc] = K + 1
+            par_disc, dst_disc = _nearest_in_full_cloud(pts, disc)
+            parents[disc] = par_disc
+            dpar[disc]    = dst_disc
+            print(f"[WARN] Stalled at level {level_id}: assigning remaining {disc.size} as disconnected level {K+1}.")
+            break
+
+        # Step 4) Advance frontier and carry observation
+        frontier = np.flatnonzero(levels == level_id)
+        observed_prev = observed_now
+        level_id += 1
+
+    # Summary log
+    total_assigned = int(np.count_nonzero(levels != -1))
+    print(f"[DONE] Levels assigned to all points ({total_assigned}/{n}). "
+          f"Seed index={seed_idx}, Z_flat={Z_flat:.6g}, delta={delta:.6g}, obs×={obs_mult}")
+
+    # ---- translate onto the plane using parent graph (keeps order) ----
+    moved = np.empty_like(pts)
+    moved[seed_idx] = pts[seed_idx]  # Level 0 unchanged
+
+    unique_lvls = np.unique(levels.astype(int))
+    unique_lvls.sort()
+
+    for k in unique_lvls:
+        if k == 0:
+            continue
+        idx_k = np.flatnonzero(levels == k)
+        if idx_k.size == 0:
+            continue
+
+        p_idx = parents[idx_k]
+
+        # Project child/parent XY to the flat plane
+        P_child_temp = np.column_stack((pts[idx_k, 0], pts[idx_k, 1], np.full(idx_k.size, Z_flat)))
+        valid_parent = p_idx >= 0
+        P_parent_temp = np.empty_like(P_child_temp)
+        P_parent_temp[valid_parent, 0] = pts[p_idx[valid_parent], 0]
+        P_parent_temp[valid_parent, 1] = pts[p_idx[valid_parent], 1]
+        P_parent_temp[valid_parent, 2] = Z_flat
+        P_parent_temp[~valid_parent] = P_child_temp[~valid_parent]  # fallback
+
+        # Anchor: favor already-computed moved parent if parent level < k
+        anchor = P_parent_temp.copy()
+        have_prev = valid_parent & (levels[p_idx] < k)
+        anchor[have_prev] = moved[p_idx[have_prev]]
+
+        # Direction on plane (robust to zero-length)
+        V = P_child_temp - P_parent_temp
+        V_norm = np.linalg.norm(V, axis=1)
+        zero_dir = V_norm < 1e-12
+        U = np.zeros_like(V)
+        if np.any(~zero_dir):
+            U[~zero_dir] = V[~zero_dir] / V_norm[~zero_dir, None]
+        if np.any(zero_dir):
+            U[zero_dir] = np.array([1.0, 0.0, 0.0])
+
+        # Distances (sanitize)
+        dist = dpar[idx_k].copy()
+        bad = ~np.isfinite(dist) | (dist < 0)
+        if np.any(bad):
+            dist[bad] = 0.0
+
+        moved[idx_k] = anchor + dist[:, None] * U
+
+    # ---- build output cloud ----
+    out = o3d.geometry.PointCloud()
+    out.points = o3d.utility.Vector3dVector(moved)
+
+    if keep_colors and pcd.has_colors():
+        out.colors = pcd.colors
+    if keep_normals and pcd.has_normals():
+        out.normals = pcd.normals
+
+    return out

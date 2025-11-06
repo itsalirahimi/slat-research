@@ -4,7 +4,7 @@ from gui.o3dgui import O3DGUI
 from .helper import *
 from utils.o3dviz import mat_mesh, fit_camera
 from .config import *
-from utils.io import save_pcd
+from ioHandle.IOHandler import save_pcd
 from utils.conversion import pcm2pcd
 
 class Mapper3D(O3DGUI):
@@ -16,29 +16,41 @@ class Mapper3D(O3DGUI):
         os.makedirs(self.config.output_dir, exist_ok=True)
         super().__init__(self.config.visMode)
 
-    def project(self, metric_depth, pose, cimg, filename, bgpcd=None):
+    def project(self, metric_depth, pose, cimg, filename):
         """
         Projects the 3D point cloud based on the provided metric depth and pose, and shows the visualization.
         """
-        projected_pc, mc = project3D(metric_depth, pose, self.config.hfov_deg, 
+        H, W = metric_depth.shape
+        ds_ratio = (self.config.downsample_pts / (H*W)) ** 0.5
+        W_ds = int(ds_ratio*W)
+        H_ds = int(ds_ratio*H)
+        metric_depth_ds = cv2.resize(metric_depth, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
+        cimg_ds = cv2.resize(cimg, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
+
+        projected_pc, mc = project3D(metric_depth_ds, pose, self.config.hfov_deg, 
                                     move=self.config.on_video,
-                                    pyramidProj=self.config.pyramidProj, 
+                                    pyramidProj=False, 
                                     scaling=self.config.scaling,
                                     do_rotate=True)
-        if bgpcd is not None:
-            if not self.config.in_camera:
-                tmp = np.asarray(bgpcd.points) @ pose.getCAM2NWU().T
-                bgpcd.points = o3d.utility.Vector3dVector(tmp)
-            if mc is not None:
-                bgpcd.points = o3d.utility.Vector3dVector(np.asarray(bgpcd.points) + mc)
+        
+        projected_pc_can, mc = project3D(metric_depth_ds, pose, self.config.hfov_deg, 
+                                    move=self.config.on_video,
+                                    pyramidProj=True, 
+                                    scaling=self.config.scaling,
+                                    do_rotate=True)
 
-        _pcd = pcm2pcd(projected_pc, cimg)
+        _pcd = pcm2pcd(projected_pc, cimg_ds)
+        _pcd_c = pcm2pcd(projected_pc_can, cimg_ds)
 
         # ======== Write to disk ========
-        _filename = os.path.join(self.config.output_dir, f"{filename}.pcd")
+        _filename_radial = os.path.join(self.config.output_dir, f"{filename}.pcd")
+        _filename_canonical = os.path.join(self.config.can_dir, f"{filename}.pcd")
+        _filename_img = os.path.join(self.config.rgb_dir, f"{filename}.png")
         if self.config.do_save:
-            save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename)
-            print(f"Wrote pcd file on {_filename}")
+            save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_radial)
+            save_pcd(np.asarray(_pcd_c.points), np.asarray(_pcd_c.colors), filepath=_filename_canonical)
+            cv2.imwrite(_filename_img, cimg_ds)
+            print(f"Wrote pcd file on {_filename_radial}")
 
         # ======== Visualize ========
         with self.scene_lock:
@@ -53,8 +65,6 @@ class Mapper3D(O3DGUI):
             name = f"points_{self.it}"
             mname = f"bgpcd_{self.it}"
             self.scene.scene.add_geometry(name, _pcd, self._mat_points(5.0))
-            if bgpcd is not None:
-                self.scene.scene.add_geometry(mname, bgpcd, mat_mesh())
             fit_camera(self.scene.scene, [_pcd])
 
 

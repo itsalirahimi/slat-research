@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 import os
+from pathlib import Path
+
+def ensure_dir(p): Path(p).mkdir(parents=True, exist_ok=True)
 
 @dataclass
 class BGPatternDiffuserConfig:
@@ -16,7 +19,6 @@ class BGPatternDiffuserConfig:
     finetune_grid_h: int = 8
     tunning_alpha: float = 1e-4
     fast: bool = False
-    downsample_dstNum: int = 1e5
     scoring_downsample_frac: float = 0.1
     verbosity: str = "tiny"
     spline_mesh_samples_u: int = 40
@@ -33,6 +35,9 @@ class BGPatternDiffuserConfig:
 
     def __post_init__(self):
         self.output_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir)
+        self.mask_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "mask")
+        ensure_dir(self.output_dir)
+        ensure_dir(self.mask_dir)
         # Enforce valid verbosity value
         allowed_verbosity = ["tiny", "none", "full"]
         if self.verbosity not in allowed_verbosity:

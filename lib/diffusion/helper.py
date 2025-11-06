@@ -1,3 +1,4 @@
+import cv2
 import numpy as np, open3d as o3d
 import open3d.visualization.gui as gui
 import secrets
@@ -345,3 +346,34 @@ def uniform_downsample(ext_pts: np.ndarray, target_fraction: float):
 
     ds_pts = ext_pts[mask]
     return ds_pts, mask
+
+def mask2image(bgmask, H, W):
+    """
+    Convert a flat boolean/numeric mask of length H*W into a binary image and save it.
+
+    Parameters
+    ----------
+    bgmask : array-like
+        1D mask of length H*W. Values will be treated as boolean (nonzero -> True).
+    H, W : int
+        Image height and width.
+    out_path : str, optional
+        Where to save the image (defaults to "bgmask.png").
+
+    Returns
+    -------
+    img : np.ndarray
+        The saved 2D uint8 image of shape (H, W) with values {0, 255}.
+    """
+    m = np.asarray(bgmask).ravel()
+    if m.size != H * W:
+        raise ValueError(f"bgmask has length {m.size}, but H*W = {H*W}.")
+
+    # Ensure boolean semantics (True for foreground, for example)
+    m_bool = m.astype(bool)
+    m_inv = ~m_bool
+
+    # Reshape row-major into (H, W)
+    img = (m_inv.astype(np.uint8) * 255).reshape(H, W)
+
+    return img

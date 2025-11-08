@@ -13,7 +13,6 @@ class Mapper3D(O3DGUI):
             "color_mode must be 'image', 'proximity', 'constant', or 'none'"
         self.config = config
         self.it = 0
-        os.makedirs(self.config.output_dir, exist_ok=True)
         super().__init__(self.config.visMode)
 
     def project(self, metric_depth, pose, cimg, filename):
@@ -43,8 +42,8 @@ class Mapper3D(O3DGUI):
         _pcd_c = pcm2pcd(projected_pc_can, cimg_ds)
 
         # ======== Write to disk ========
-        _filename_radial = os.path.join(self.config.output_dir, f"{filename}.pcd")
-        _filename_canonical = os.path.join(self.config.can_dir, f"{filename}.pcd")
+        _filename_radial = os.path.join(self.config.radial_dir, f"{filename}.pcd")
+        _filename_canonical = os.path.join(self.config.canonical_dir, f"{filename}.pcd")
         _filename_img = os.path.join(self.config.rgb_dir, f"{filename}.png")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_radial)

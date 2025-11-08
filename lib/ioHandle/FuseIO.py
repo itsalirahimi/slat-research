@@ -11,10 +11,13 @@ from kinematics.pose import ExtMat, Point6, Pose
 class FuseIO(IOHandler):
     def __init__(self):
         super().__init__()
-
+        assert not self.args.dst, "Invalid argument [--dst]: destination is set automatically when fusing."
+        assert self.args.bg_rad, "Must set bg_rad when fusing."
+        assert self.args.bg_can, "Must set bg_can when fusing."
+    
     def load_row(self, row):
         if (self.cfg["kinematics"] == "CAM2NWU"):
-            extmat_path = os.path.join(self.dataset_dir, "extmat")
+            extmat_path = os.path.join(self.dataset_dir, "data", "pose")
             extmat_path = os.path.join(extmat_path, row["name"] + ".json")
             with open(extmat_path, "r") as f:
                 extmat_d = json.load(f)
@@ -40,11 +43,7 @@ class FuseIO(IOHandler):
 
         src_path = matches[0]
         src_ext = os.path.splitext(src_path)[1]
-        if src_ext == ".npy":
-            src = np.load(src_path).astype(np.float32)
-        elif src_ext == ".csv":
-            src = np.loadtxt(src_path, delimiter=',', dtype=np.float32)
-        elif src_ext == ".pcd":
+        if src_ext == ".pcd":
             src = load_pcd(src_path)
         else:
             raise ValueError("Invalid filename extension")
@@ -52,12 +51,19 @@ class FuseIO(IOHandler):
         color_path = os.path.join(self.dataset_dir, "projection", self.dst,
                                   "rgb", row["name"] + self.cfg["rgb_extension"])
         color_img = cv2.imread(color_path)
-        bg = load_pcd(os.path.join(self.bgDir, f"{row['name']}.pcd"))
+
+        bg_rad_dir = os.path.join(self.args.bg_rad)
+        bg_can_dir = os.path.join(self.args.bg_can)
+
+        bg_rad = load_pcd(os.path.join(bg_rad_dir, f"{row['name']}.pcd"))
+        bg_can = load_pcd(os.path.join(bg_can_dir, f"{row['name']}.pcd"))
+
         dic = {
             "pose": p, 
             "source": src, 
             "image": color_img, 
-            "bg": bg,
+            "bg_rad": bg_rad,
+            "bg_can": bg_can,
             "idx": row['index'],
             "name": row["name"]
         }

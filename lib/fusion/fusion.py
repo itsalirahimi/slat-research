@@ -4,6 +4,7 @@ import numpy as np
 import open3d as o3d
 from gui.o3dgui import O3DGUI
 from ioHandle.IOHandler import load_pcd, save_pcd, save_pcm_as_pcd
+from kinematics.clouds import apply_transform_points, orient_point_cloud_cgplane_global
 from utils.o3dviz import fit_camera, mat_mesh, viz_pcd
 from .config import BGPatternFuserConfig, FlatFusionMode
 from .helper import unfold_depth, drop_depth, NDFDrop_depth, calc_ground_depth, \
@@ -124,7 +125,6 @@ class BGPatternFuser(O3DGUI):
         self.it = 0
         self.shape = None
         self.projected_pcd = None
-        os.makedirs(self.config.output_dir, exist_ok=True)
         assert not self.config.in_camera, "When requesting fusion, the in_camera must be False (i.e. cam2nwu rotation required)"
         super().__init__(self.config.visMode)
 
@@ -134,102 +134,69 @@ class BGPatternFuser(O3DGUI):
         else:
             assert self.shape == shape[:2], "Inconsistent image shape detected in fuser"
 
-    def fuse_flat_ground(self, cimg, data, bg_pcd, pose, filename):
+    def fuse(self, cimg, rd_pcd_rad, bg_pcd_rad, bg_pcd_can, pose, filename):
         H, W, _ = cimg.shape
+        rd_pcm_nwu = pcd2pcm(rd_pcd_rad, H, W)
+        self.set_internal_shape(rd_pcm_nwu.shape)
+        gep_pcm_nwu_nonscaled = computeGeps(self.shape, 62, pose)
+        gep_pcm_nwu = gep_pcm_nwu_nonscaled * calc_scale_factor(np.min(rd_pcm_nwu[:,:,2]), 
+            scaling=Scaling.MIN_Z, bgz=None, pc_to_be_rescaled=gep_pcm_nwu_nonscaled)
         
-        if self.config.flat_mode == FlatFusionMode.Depyramidize:
-            # 'Depyramidize' fusion method requires pyramid projection math
-            rd_pcm_cam, _ = pcd2pcm(data, H, W)
-            rd_pcm_nwu = None
-            self.set_internal_shape(rd_pcm_cam.shape)
-            rdpcarr_cam = pcm2pcdArr(rd_pcm_cam)
-            fus_pcm_arr_cam, _, _ = depyramidize_pointCloud(rdpcarr_cam)
-            fused_pcm_cam = pcdArr2pcm(fus_pcm_arr_cam, rd_pcm_cam.shape[0], rd_pcm_cam.shape[1])
-            fused_pcm_cam *= calc_scale_factor(pose.p6.z, Scaling.MEAN_Z, 
-                                          bgz=np.ones(self.shape)*NULL_SCALE_MIN_Z)
-            fused_pcm_nwu = fused_pcm_cam @ pose.getCAM2NWU().T
-
-        else:
-            rd_pcm_cam = None
-            rd_pcm_nwu = pcd2pcm(data, H, W)
-            self.set_internal_shape(rd_pcm_nwu.shape)
-
-            gep_pcm_nwu_nonscaled = computeGeps(self.shape, 63, pose)
-            gep_pcm_nwu = gep_pcm_nwu_nonscaled * calc_scale_factor(np.min(rd_pcm_nwu[:,:,2]), 
-                scaling=Scaling.MIN_Z, bgz=None, pc_to_be_rescaled=gep_pcm_nwu_nonscaled)
-            
-            if self.config.flat_mode == FlatFusionMode.NDFDrop:
-                assert bg_pcd is not None, "'NDFDrop' fusion mode requires background data"
-
-                bg_pcd_nwu = bg_pcd
-                fused_pcm_nwu, base_elevs = NDFDrop_depth(rd_pcm_nwu, bg_pcd_nwu, gep_pcm_nwu)
-
-
-            elif self.config.flat_mode == FlatFusionMode.Unfold:
-                assert bg_pcd is not None, "'Unfold' fusion mode requires background data"
-
-                bg_pcd_nwu = bg_pcd
-                fused_pcm_nwu = unfold_depth(rd_pcm_nwu, bg_pcd_nwu, gep_pcm_nwu, H, W)
-
-            else:
-                raise ValueError("Unknown refusion mode")
-            
-
-            def resacle_and_repose(pcd):
-                pcd *= 113.86/NULL_SCALE_MIN_Z
-                pcd[:,:, 0] += 65
-                pcd[:,:, 1] += 21
-                return pcd
-                
-            save_debug_files = True
-            if save_debug_files:
-                save_pcm_as_pcd(fused_pcm_nwu, "fused_pcm_nwu.pcd", vizimg=cimg)
-
-                fused_pcm_nwu_scaled = resacle_and_repose(fused_pcm_nwu)
-                save_pcm_as_pcd(fused_pcm_nwu_scaled, "fused_pcm_nwu_scaled.pcd", color = [255, 0, 0])
-                
-                fused_pcm_cam = fused_pcm_nwu @ pose.getNWU2CAM()
-                save_pcm_as_pcd(fused_pcm_cam, "fused_pcm_cam.pcd", color = [255, 0, 0])
-                
-                gep_pcm_nwu = resacle_and_repose(gep_pcm_nwu)
-                save_pcm_as_pcd(gep_pcm_nwu, "gep_pcm_nwu.pcd", color = [255, 255, 0])
-
-                rd_pcm_nwu = resacle_and_repose(rd_pcm_nwu)
-                save_pcm_as_pcd(rd_pcm_nwu, "rd_pcm_nwu.pcd", color = [0, 255, 255])
-
-                save_pcd(np.asarray(bg_pcd_nwu.points), np.asarray(np.zeros_like(bg_pcd_nwu.points)), "bg_pcd_nwu.pcd")
-
-                depth_pro_pcd = load_pcd("/home/psash/slat-research/data/ortholoc/projection/canonical/L08_R0000.pcd")
-                depth_pro_pcm = pcd2pcm(depth_pro_pcd, H, W)
-                save_pcm_as_pcd(depth_pro_pcm, "depth_pro_pcm.pcd", color = [255, 0, 0])
-                depth_pro_pcm_rescaled = resacle_and_repose(depth_pro_pcm)
-                save_pcm_as_pcd(depth_pro_pcm_rescaled, "depth_pro_pcm_rescaled.pcd", color = [255, 0, 0])
-                fused_pcd_nwu = pcm2pcd(fused_pcm_nwu)
-                iterlist = []
-                a = gep_pcm_nwu[0,0,0]
-                b = gep_pcm_nwu[0,0,1]
-                iterlist.append((a,b))
-                a = gep_pcm_nwu[0,W-1,0]
-                b = gep_pcm_nwu[0,W-1,1]
-                iterlist.append((a,b))
-                a = gep_pcm_nwu[H-1,W-1,0]
-                b = gep_pcm_nwu[H-1,W-1,1]
-                iterlist.append((a,b))
-                a = gep_pcm_nwu[H-1,0,0]
-                b = gep_pcm_nwu[H-1,0,1]
-                iterlist.append((a,b))
-                fused_pcm_nwu_polygon = reshape_in_polygon(iterlist, fused_pcd_nwu,H, W)
-                save_pcd(np.asarray(fused_pcm_nwu_polygon.points),
-                         np.asarray(np.zeros_like(fused_pcm_nwu_polygon.points)),
-                         "fused_pcm_nwu_polygon.pcd")
-                
         
-        # if self.config.on_video:
-        #     fused_pcm_nwu += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
+        cg_bg_pcd_can, T = orient_point_cloud_cgplane_global(bg_pcd_can)
+        bg_pcd_rad_trans = apply_transform_points(np.asarray(bg_pcd_rad.points), T)
+        rd_pcd_rad_trans = apply_transform_points(np.asarray(rd_pcd_rad.points), T)
+        rd_pcd_rad_trans_pcd = o3d.geometry.PointCloud()
+        rd_pcd_rad_trans_pcd.points = o3d.utility.Vector3dVector(rd_pcd_rad_trans)
+        rd_pcm_rad_trans = pcd2pcm(rd_pcd_rad_trans_pcd, H, W)
+        bg_pcd_rad_trans_pcd = o3d.geometry.PointCloud()
+        bg_pcd_rad_trans_pcd.points = o3d.utility.Vector3dVector(bg_pcd_rad_trans)
+        fused_pcm_nwu = unfold_depth(rd_pcm_rad_trans, bg_pcd_rad_trans_pcd, gep_pcm_nwu, H, W)
+        def resacle_and_repose(pcd):
+            pcd *= 113.86/NULL_SCALE_MIN_Z
+            pcd[:,:, 0] += 65
+            pcd[:,:, 1] += 21
+            return pcd
+        gep_pcm_nwu_scaled = resacle_and_repose(gep_pcm_nwu)
+        fused_pcm_nwu_scaled = resacle_and_repose(fused_pcm_nwu)
+        fused_pcd_nwu = pcm2pcd(fused_pcm_nwu_scaled)
+        save_pcm_as_pcd(gep_pcm_nwu, "gep_pcm_nwu.pcd", color = [255, 255, 0])
+        save_pcm_as_pcd(gep_pcm_nwu_scaled, "gep_pcm_nwu_scaled.pcd", color = [255, 255, 0])
+        aa = load_pcd("atp_prj_canonical.pcd")
+        aa = pcd2pcm(aa, H, W)
+        aaa = resacle_and_repose(aa)
+        save_pcm_as_pcd(aaa, "aaa.pcd", color = [255, 255, 0])
+
+
+        iterlist = []
+        a = gep_pcm_nwu[0,0,0]
+        b = gep_pcm_nwu[0,0,1]
+        iterlist.append((a,b))
+        a = gep_pcm_nwu[0,W-1,0]
+        b = gep_pcm_nwu[0,W-1,1]
+        iterlist.append((a,b))
+        a = gep_pcm_nwu[H-1,W-1,0]
+        b = gep_pcm_nwu[H-1,W-1,1]
+        iterlist.append((a,b))
+        a = gep_pcm_nwu[H-1,0,0]
+        b = gep_pcm_nwu[H-1,0,1]
+        iterlist.append((a,b))
+        fused_pcm_nwu_polygon = reshape_in_polygon(iterlist, fused_pcd_nwu, H, W)
+        save_pcd(np.asarray(fused_pcm_nwu_polygon.points),
+                    np.asarray(np.zeros_like(fused_pcm_nwu_polygon.points)),
+                    "fused_pcm_nwu_polygon.pcd")
         
+        az = pcm2pcd(aaa)
+        prjc = reshape_in_polygon(iterlist, az, H, W)
+        save_pcd(np.asarray(prjc.points),
+                    np.asarray(np.zeros_like(prjc.points)),
+                    "prjc.pcd")
+        
+        save_pcm_as_pcd(fused_pcm_nwu_scaled, "fused_pcm_nwu_scaled.pcd", color = [255, 0, 0])
+
         _pcd = pcm2pcd(fused_pcm_nwu, cimg)
         # ======== Write to disk ========
-        _filename_fuse = os.path.join(self.config.output_dir, f"{filename}.pcd")
+        _filename_fuse = os.path.join(self.config.fusion_dir, f"{filename}.pcd")
         _filename_gep = os.path.join(self.config.gep_dir, f"{filename}.pcd")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_fuse)
@@ -252,5 +219,120 @@ class BGPatternFuser(O3DGUI):
             self.scene.scene.add_geometry(name, _pcd, self._mat_points(5.0))
             fit_camera(self.scene.scene, [_pcd])
 
-    def fuse_elevation(self):
-        assert False, "Not yet developed"
+        
+    # def fuse_flat_ground(self, cimg, data, bg_pcd, pose, filename):
+    #     H, W, _ = cimg.shape
+        
+    #     if self.config.flat_mode == FlatFusionMode.Depyramidize:
+    #         # 'Depyramidize' fusion method requires pyramid projection math
+    #         rd_pcm_cam, _ = pcd2pcm(data, H, W)
+    #         rd_pcm_nwu = None
+    #         self.set_internal_shape(rd_pcm_cam.shape)
+    #         rdpcarr_cam = pcm2pcdArr(rd_pcm_cam)
+    #         fus_pcm_arr_cam, _, _ = depyramidize_pointCloud(rdpcarr_cam)
+    #         fused_pcm_cam = pcdArr2pcm(fus_pcm_arr_cam, rd_pcm_cam.shape[0], rd_pcm_cam.shape[1])
+    #         fused_pcm_cam *= calc_scale_factor(pose.p6.z, Scaling.MEAN_Z, 
+    #                                       bgz=np.ones(self.shape)*NULL_SCALE_MIN_Z)
+    #         fused_pcm_nwu = fused_pcm_cam @ pose.getCAM2NWU().T
+
+    #     else:
+    #         rd_pcm_cam = None
+    #         rd_pcm_nwu = pcd2pcm(data, H, W)
+    #         self.set_internal_shape(rd_pcm_nwu.shape)
+
+    #         gep_pcm_nwu_nonscaled = computeGeps(self.shape, 70, pose)
+    #         gep_pcm_nwu = gep_pcm_nwu_nonscaled * calc_scale_factor(np.min(rd_pcm_nwu[:,:,2]), 
+    #             scaling=Scaling.MIN_Z, bgz=None, pc_to_be_rescaled=gep_pcm_nwu_nonscaled)
+            
+    #         if self.config.flat_mode == FlatFusionMode.NDFDrop:
+    #             assert bg_pcd is not None, "'NDFDrop' fusion mode requires background data"
+
+    #             bg_pcd_nwu = bg_pcd
+    #             fused_pcm_nwu, base_elevs = NDFDrop_depth(rd_pcm_nwu, bg_pcd_nwu, gep_pcm_nwu)
+
+
+    #         elif self.config.flat_mode == FlatFusionMode.Unfold:
+    #             assert bg_pcd is not None, "'Unfold' fusion mode requires background data"
+
+    #             bg_pcd_nwu = bg_pcd
+    #             fused_pcm_nwu = unfold_depth(rd_pcm_nwu, bg_pcd_nwu, gep_pcm_nwu, H, W)
+
+    #         else:
+    #             raise ValueError("Unknown refusion mode")
+            
+
+    #         def resacle_and_repose(pcd):
+    #             pcd *= 113.86/NULL_SCALE_MIN_Z
+    #             pcd[:,:, 0] += 65
+    #             pcd[:,:, 1] += 21
+    #             return pcd
+                
+    #         save_debug_files = False
+    #         if save_debug_files:
+    #             save_pcm_as_pcd(fused_pcm_nwu, "fused_pcm_nwu.pcd", vizimg=cimg)
+
+    #             fused_pcm_nwu_scaled = resacle_and_repose(fused_pcm_nwu)
+    #             save_pcm_as_pcd(fused_pcm_nwu_scaled, "fused_pcm_nwu_scaled.pcd", color = [255, 0, 0])
+                
+    #             fused_pcm_cam = fused_pcm_nwu @ pose.getNWU2CAM()
+    #             save_pcm_as_pcd(fused_pcm_cam, "fused_pcm_cam.pcd", color = [255, 0, 0])
+                
+    #             save_pcm_as_pcd(gep_pcm_nwu, "gep_pcm_nwu.pcd", color = [255, 255, 0])
+    #             gep_pcm_nwu_scaled = resacle_and_repose(gep_pcm_nwu)
+    #             save_pcm_as_pcd(gep_pcm_nwu_scaled, "gep_pcm_nwu_scaled.pcd", color = [255, 255, 0])
+
+    #             rd_pcm_nwu = resacle_and_repose(rd_pcm_nwu)
+    #             save_pcm_as_pcd(rd_pcm_nwu, "rd_pcm_nwu.pcd", color = [0, 255, 255])
+
+    #             save_pcd(np.asarray(bg_pcd_nwu.points), np.asarray(np.zeros_like(bg_pcd_nwu.points)), "bg_pcd_nwu.pcd")
+
+    #             fused_pcd_nwu = pcm2pcd(fused_pcm_nwu)
+    #             iterlist = []
+    #             a = gep_pcm_nwu[0,0,0]
+    #             b = gep_pcm_nwu[0,0,1]
+    #             iterlist.append((a,b))
+    #             a = gep_pcm_nwu[0,W-1,0]
+    #             b = gep_pcm_nwu[0,W-1,1]
+    #             iterlist.append((a,b))
+    #             a = gep_pcm_nwu[H-1,W-1,0]
+    #             b = gep_pcm_nwu[H-1,W-1,1]
+    #             iterlist.append((a,b))
+    #             a = gep_pcm_nwu[H-1,0,0]
+    #             b = gep_pcm_nwu[H-1,0,1]
+    #             iterlist.append((a,b))
+    #             fused_pcm_nwu_polygon = reshape_in_polygon(iterlist, fused_pcd_nwu,H, W)
+    #             save_pcd(np.asarray(fused_pcm_nwu_polygon.points),
+    #                      np.asarray(np.zeros_like(fused_pcm_nwu_polygon.points)),
+    #                      "fused_pcm_nwu_polygon.pcd")
+                
+        
+    #     # if self.config.on_video:
+    #     #     fused_pcm_nwu += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
+        
+    #     _pcd = pcm2pcd(fused_pcm_nwu, cimg)
+    #     # ======== Write to disk ========
+    #     _filename_fuse = os.path.join(self.config.fusion_dir, f"{filename}.pcd")
+    #     _filename_gep = os.path.join(self.config.gep_dir, f"{filename}.pcd")
+    #     if self.config.do_save:
+    #         save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_fuse)
+    #         _pcd_gep = pcm2pcd(gep_pcm_nwu, cimg)
+    #         save_pcd(np.asarray(_pcd_gep.points), np.asarray(_pcd_gep.colors), filepath=_filename_gep)
+    #         print(f"Wrote pcd file on {_filename_fuse}")
+
+    #     # ======== Visualize ========
+    #     with self.scene_lock:
+    #         if self.config.visMode == VisMode.MSingle:
+    #             name = f"points_{self.it}"
+    #             mname = f"bgpcd_{self.it}"
+    #             self.scene.scene.remove_geometry(name)
+    #             self.scene.scene.remove_geometry(mname)
+    #         elif self.config.visMode == VisMode.MAccum:
+    #             pass
+    #         self.it += 1
+    #         name = f"points_{self.it}"
+    #         mname = f"bgpcd_{self.it}"
+    #         self.scene.scene.add_geometry(name, _pcd, self._mat_points(5.0))
+    #         fit_camera(self.scene.scene, [_pcd])
+
+    # def fuse_elevation(self):
+    #     assert False, "Not yet developed"

@@ -34,10 +34,11 @@ class Mapper3DConfig:
     downsample_pts: int = 100000
 
     def __post_init__(self):
-        self.output_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "radial")
+        self.radial_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "radial")
         self.rgb_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "rgb")
-        self.can_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "canonical")
-        ensure_dir(self.output_dir)
+        self.canonical_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "canonical")
+        ensure_dir(self.radial_dir)
+        ensure_dir(self.canonical_dir)
         ensure_dir(self.rgb_dir)
         if self.on_video:
             self.visMode = VisMode.MAccum

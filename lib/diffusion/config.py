@@ -34,9 +34,9 @@ class BGPatternDiffuserConfig:
     ct1iters: int = 200
 
     def __post_init__(self):
-        self.output_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir)
+        self.diffusion_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "background")
         self.mask_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "mask")
-        ensure_dir(self.output_dir)
+        ensure_dir(self.diffusion_dir)
         ensure_dir(self.mask_dir)
         # Enforce valid verbosity value
         allowed_verbosity = ["tiny", "none", "full"]

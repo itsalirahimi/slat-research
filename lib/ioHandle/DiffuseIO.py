@@ -9,6 +9,7 @@ from ioHandle.IOHandler import IOHandler, load_pcd
 class DiffuseIO(IOHandler):
     def __init__(self):
         super().__init__()
+        assert self.args.dst, "Must set --dst when diffusing."
     
     def load_row(self, row):
         target_name = row["name"]
@@ -28,7 +29,6 @@ class DiffuseIO(IOHandler):
         
         color_path = os.path.join(self.source_dir, "..",
                                   "rgb", row["name"] + self.cfg["rgb_extension"])
-        
         color_img = cv2.imread(color_path)
         dic = {
             "source": src, 

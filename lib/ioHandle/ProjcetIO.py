@@ -14,7 +14,7 @@ class ProjcetIO(IOHandler):
 
     def load_row(self, row):
         if (self.cfg["kinematics"] == "CAM2NWU"):
-            extmat_path = os.path.join(self.dataset_dir, "extmat")
+            extmat_path = os.path.join(self.dataset_dir, "data", "pose")
             extmat_path = os.path.join(extmat_path, row["name"] + ".json")
             with open(extmat_path, "r") as f:
                 extmat_d = json.load(f)
@@ -45,12 +45,10 @@ class ProjcetIO(IOHandler):
             src = np.load(src_path).astype(np.float32)
         elif src_ext == ".csv":
             src = np.loadtxt(src_path, delimiter=',', dtype=np.float32)
-        elif src_ext == ".pcd":
-            src = load_pcd(src_path)
         else:
             raise ValueError("Invalid filename extension")
         
-        color_path = os.path.join(self.dataset_dir, 
+        color_path = os.path.join(self.dataset_dir, "data",
                                   "rgb", row["name"] + self.cfg["rgb_extension"])
         color_img = cv2.imread(color_path)
 

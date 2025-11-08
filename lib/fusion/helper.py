@@ -1467,11 +1467,15 @@ def unfold_depth(dpc, bpc_pcd, gpc, H, W):
     proj_b_idx_i = np.int32(proj_b_idx)
     dist = euclidean_distance_map(dpc, proj_b)     # H * W * 1
     unfolded_dpc = np.zeros_like(proj_g)
+    gepz = np.mean(np.asarray(gpc_pcd.points)[:,2])
+    bgz = np.min(np.asarray(bpc_pcd.points)[:,2])
     for i in range(dpc.shape[0]):
         for j in range(dpc.shape[1]):
             unfolded_dpc[i, j, 0] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 0]
             unfolded_dpc[i, j, 1] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 1]
             unfolded_dpc[i, j, 2] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 2] + dist[i,j,0]
+            unfolded_dpc[i, j, 2] += gepz - bgz
+    
     return unfolded_dpc
 
 def map_pc_proj_to_index(pc_proj: np.ndarray, pc: np.ndarray, k: int = 3) -> np.ndarray:

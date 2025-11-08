@@ -28,7 +28,6 @@ class BGPatternDiffuser:
         self.scorer = Projection3DScorer(self.config)
         self.tunner = Optimizer(self.config)
         self.scoring_base_mesh = None
-        os.makedirs(self.config.output_dir, exist_ok=True)
     
     def initialCoarseTune(self, rd_pcd_arr, rd_pcd):
         print(f"[BGPatternDiffuser] ------- Initial coarse tunning ...")
@@ -154,11 +153,7 @@ class BGPatternDiffuser:
         T_inv[:3, :3] = R.T
         T_inv[:3, 3]  = -R.T @ t
         bgpts = project_external_along_normals_noreject(rd_pcd_arr, fmesh)
-        # filename1 = f"_{idx}.pcd"
-        # outname1 = os.path.join(self.config.output_dir, filename1)
         # Debug data log:
-        # filename2 = f"ctrl_{idx}.csv"
-        # outname2 = os.path.join(self.config.output_dir, filename2)
         # save_pcd(bgpts, np.zeros_like(np.asarray(rd_pcd.colors)), outname)
         # save_pcd(np.asarray(rd_pcd.points), np.asarray(rd_pcd_cam.colors), outname1)
         # np.savetxt(outname2, fine_tunned, delimiter=',')
@@ -167,7 +162,7 @@ class BGPatternDiffuser:
         bg_pts = bg_pc_arr_cam[bgmask]
         colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
         colors[:,0] = 1
-        _filename_diffusion = os.path.join(self.config.output_dir, f"{name}.pcd")
+        _filename_diffusion = os.path.join(self.config.diffusion_dir, f"{name}.pcd")
         _filename_mask = os.path.join(self.config.mask_dir, f"{name}.png")
         save_pcd(bg_pc_arr_cam, colors, _filename_diffusion)
         H, W, _ = cimg.shape

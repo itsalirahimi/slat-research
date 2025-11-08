@@ -27,12 +27,13 @@ def main():
         fuser.advance.wait()
         print(f"[info] fusing the new frame: {dict['idx']} ...")
         # Generate a random point cloud and update the app
-        fuser.fuse_flat_ground(dict["image"],
-                               dict["source"],
-                               dict["bg"],
-                               dict["pose"],
-                               dict["name"]
-                               )
+        fuser.fuse(dict["image"],
+                   dict["source"],
+                   dict["bg_rad"],
+                   dict["bg_can"],
+                   dict["pose"],
+                   dict["name"]
+                   )
         print(f"[info] fusion done and scene updated for index {dict['idx']}.")
         # fuser.rescale_and_locate()
         # Reset the advance flag

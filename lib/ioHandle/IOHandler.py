@@ -30,6 +30,10 @@ class IOHandler:
             help="Path to the source directory (e.g., ../../data/e)")
         self.parser.add_argument("--dst", type=str,
             help="Path to the output directory (e.g., ../../data/e)")
+        self.parser.add_argument("--bg_rad", type=str,
+            help="Path to the background directory (e.g., ../../data/e)")
+        self.parser.add_argument("--bg_can", type=str,
+            help="Path to the background directory (e.g., ../../data/e)")
         self.parser.add_argument("--index", type=int, 
             help="Row index to use from dataset (matches 'index' column)")
         self.parser.add_argument("--start", type=int, 
@@ -44,16 +48,7 @@ class IOHandler:
 
         self.args = self.parser.parse_args()
 
-
-        # Resolve the dataset path relative to the current working directory
-        self.src = self.args.src.name
-        if self.args.dst:
-            self.dst = self.args.dst
-        else:
-            self.dst = self.src
-        
-
-        self.dataset_dir = Path(self.args.src).expanduser().resolve().parent.parent
+        self.dataset_dir = Path(self.args.src).expanduser().resolve().parent.parent.parent
         if not self.dataset_dir.is_dir():
             print(f"Dataset directory not found: {self.dataset_dir}", file=sys.stderr)
             sys.exit(2)
@@ -69,10 +64,14 @@ class IOHandler:
         self.rowslist = self.df.to_dict("records")
 
         self.source_dir = self.args.src
-        self.bgDir = os.path.join(self.dataset_dir, "diffusion", self.dst)
 
+        self.dst = os.path.basename(os.path.dirname(self.args.src))
+        
     def getDstDir(self):
-        return self.dst
+        if self.args.dst:
+            return self.args.dst
+        else:
+            return self.dst
     
     def getDoSave(self):
         return self.args.save

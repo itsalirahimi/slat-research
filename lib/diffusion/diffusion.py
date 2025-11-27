@@ -5,10 +5,11 @@ import os
 import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../../lib")
+from fusion.helper import compute_center_of_mass
 from geom.surfaces import cg_centeric_xy_spline, bspline_surface_mesh_from_ctrl, \
     project_external_along_normals_noreject
 from projection.helper import project3D
-from utils.conversion import pcm2pcd, pcd2pcdArr, pcdArr2pcd
+from utils.conversion import pcm2pcd, pcd2pcdArr, pcdArr2pcd, pcm2pcdArr
 # from utils.o3dviz import visualize_spline_mesh
 from .tunning import Optimizer
 from .scoring import Projection3DScorer
@@ -19,7 +20,6 @@ from utils.o3dviz import visualize_spline_mesh
 import time
 from kinematics.clouds import orient_point_cloud_cgplane_global, apply_transform_points
 from ioHandle.IOHandler import save_pcd
-from projection.config import Scaling
 from geom.surfaces import filter_mesh_neighbors
 
 class BGPatternDiffuser:
@@ -66,9 +66,16 @@ class BGPatternDiffuser:
         rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_cam)
         rd_pcd_arr = pcd2pcdArr(rd_pcd)
 
-        # -------------- Provide initial guess if does not exist
-        if self.scoring_base_mesh is None:
-            self.scoring_base_mesh, self.guess1 = self.initialCoarseTune(rd_pcd_arr.copy(), rd_pcd)
+        self.scoring_base_mesh, self.guess1 = self.initialCoarseTune(rd_pcd_arr.copy(), rd_pcd)
+        # cg_data = compute_center_of_mass(pcd2pcdArr(rd_pcd_cam))
+        # # -------------- Provide initial guess if does not exist
+        # if self.scoring_base_mesh is None:
+        #     self.scoring_base_mesh, self.guess1 = self.initialCoarseTune(rd_pcd_arr.copy(), rd_pcd)
+        # else:
+        #     cg_old = cg_data
+        #     cg_new = compute_center_of_mass(pcd2pcdArr(rd_pcd_cam))
+        #     trans = cg_new - cg_old
+        #     self.guess1 += trans
 
         # ================== Coarse-Tune the Back-Ground Model
         print(f"[BGPatternDiffuser] ------- Start Iterative coarse tunning on index {idx}")

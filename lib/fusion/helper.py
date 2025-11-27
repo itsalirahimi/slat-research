@@ -1,10 +1,12 @@
 import os, sys
 import math, time
-from typing import Optional, Tuple
+from typing import Iterable, Optional, Tuple
 
-from utils.conversion import pcd2pcm, pcm2pcd
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/..")
+from geom.surfaces import bspline_surface_mesh_from_ctrl, project_external_along_normals_noreject
+from projection.helper import calcCameraDirs
+from utils.conversion import pcd2pcm, pcdArr2pcm, pcm2pcd, pcm2pcdArr
 from kinematics.pose import Pose
 import open3d as o3d
 import numpy as np
@@ -1378,18 +1380,30 @@ def calc_ground_depth(hfov_degs,
     depth_img     = np.minimum(depth_img, 255.0)                # clamp just in case
     return depth_img
 
-def NDFDrop_depth(dpc, bpcd, gpc):
-    dpc_pcd = pcm2pcd(dpc)
-    # bpc_pcd = pcm2pcd(bpc)
+def NDFDrop_depth_old(dpc, bpcd, gpc):
     bpc_pcd = bpcd
     gpc_pcd = pcm2pcd(gpc)
     
+    # bpc_pcd = bpc_pcd.voxel_down_sample(0.02)
+    # gpc_pcd = gpc_pcd.voxel_down_sample(0.02)
     bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
-    bpc_pcd = bpc_pcd.voxel_down_sample(0.02)
     gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
-    gpc_pcd = gpc_pcd.voxel_down_sample(0.02)
     
     proj_b = project_points_multi_fast(bpc_pcd, dpc, k=8, just_proj=True)
+    proj_g = project_points_multi_fast(gpc_pcd, proj_b, k=8, just_proj=True)
+    dist = euclidean_distance_map(dpc, proj_b)
+    unfolded_dpc = proj_g.copy()
+    unfolded_dpc[:, :, 2:3] += dist
+    return unfolded_dpc, proj_g[:,:,2]
+
+def NDFDrop_depth(dpc, bpc_ctrl, gpc, H, W):
+    gpc_pcd = pcm2pcd(gpc)
+
+    bpc_mesh = bspline_surface_mesh_from_ctrl(bpc_ctrl,20,20,40,40)
+    proj_b_pcdarr = project_external_along_normals_noreject(dpc.reshape(-1, 3), bpc_mesh)
+    proj_b = pcdArr2pcm(proj_b_pcdarr, H,W)
+    gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    
     proj_g = project_points_multi_fast(gpc_pcd, proj_b, k=8, just_proj=True)
     dist = euclidean_distance_map(dpc, proj_b)
     unfolded_dpc = proj_g.copy()
@@ -1451,15 +1465,102 @@ def rescale_depth(depth_image, bg_image, pitch):
         raise ValueError("Non-logical ratio calculation")
     return final_f, gep_f
 
-def unfold_depth(dpc, bpc_pcd, gpc, H, W):
+def fit_ctrl_grid_from_point_cloud(
+    pcd: o3d.geometry.PointCloud,
+    grid_w: int = 20,
+    grid_h: int = 20,
+    k_neighbors: int = 10,
+    margin_scale: float = 1.2,
+    idw: bool = True,
+    idw_power: float = 2.0,
+) -> np.ndarray:
+    """
+    Approximate a spline control grid by:
+      - projecting to XY
+      - sampling a regular XY grid across an *expanded* bounding box
+      - for each grid point, estimating Z from nearest neighbors in the cloud
+        (IDW by default; mean if idw=False)
+
+    Args:
+        pcd: Open3D point cloud
+        grid_w, grid_h: control grid resolution in X (columns) and Y (rows)
+        k_neighbors: K for the XY-nearest-neighbor lookup
+        margin_scale: expand the XY bbox by this factor around its center
+                      (e.g., 1.2 means +20% extents in both X and Y)
+        idw: if True, use inverse-distance weighting for Z; else simple mean
+        idw_power: power for IDW weights, typically 1..3
+
+    Returns:
+        (grid_h * grid_w, 3) flattened control points in XYZ.
+    """
+    # --- extract and sanitize points
+    pts = np.asarray(pcd.points, dtype=float)
+    if pts.size == 0:
+        raise ValueError("Point cloud is empty.")
+    # drop non-finite
+    finite_mask = np.isfinite(pts).all(axis=1)
+    if not np.any(finite_mask):
+        raise ValueError("All points are NaN/Inf.")
+    pts = pts[finite_mask]
+
+    # --- XY bounding box with margin expansion about the center
+    min_xy = pts[:, :2].min(axis=0)
+    max_xy = pts[:, :2].max(axis=0)
+    ctr_xy = 0.5 * (min_xy + max_xy)
+    half_ext = 0.5 * (max_xy - min_xy)
+    half_ext = half_ext * float(margin_scale)  # expand
+    min_xy_ext = ctr_xy - half_ext
+    max_xy_ext = ctr_xy + half_ext
+
+    # --- sample a regular grid over the expanded XY box
+    xs = np.linspace(min_xy_ext[0], max_xy_ext[0], grid_w)
+    ys = np.linspace(min_xy_ext[1], max_xy_ext[1], grid_h)
+
+    # --- KD-tree on XY only (set Z=0 so distances are purely XY)
+    pts_xy = np.column_stack([pts[:, 0], pts[:, 1], np.zeros_like(pts[:, 2])])
+    pcd_xy = o3d.geometry.PointCloud()
+    pcd_xy.points = o3d.utility.Vector3dVector(pts_xy)
+    kdtree = o3d.geometry.KDTreeFlann(pcd_xy)
+
+    K = int(max(1, min(k_neighbors, pts.shape[0])))
+
+    ctrl_grid = np.zeros((grid_h, grid_w, 3), dtype=float)
+
+    for j, y in enumerate(ys):
+        for i, x in enumerate(xs):
+            query = np.array([x, y, 0.0], dtype=float)
+            _, idx, d2 = kdtree.search_knn_vector_3d(query, K)
+            # idx: neighbor indices into pts / pts_xy
+            z_neighbors = pts[idx, 2]
+
+            if idw:
+                # inverse distance weighting in XY (use sqrt of squared distances)
+                d = np.sqrt(np.asarray(d2, dtype=float))
+                # if one neighbor is exactly at the query (d ~ 0), fall back to its Z
+                near_zero = d < 1e-12
+                if np.any(near_zero):
+                    z_est = float(np.mean(z_neighbors[near_zero]))
+                else:
+                    w = 1.0 / np.power(d, idw_power)
+                    z_est = float(np.dot(w, z_neighbors) / np.sum(w))
+            else:
+                # simple mean of neighbor Zs
+                z_est = float(np.mean(z_neighbors))
+
+            ctrl_grid[j, i, :] = [x, y, z_est]
+
+    return ctrl_grid.reshape(-1, 3)
+
+def unfold_depth_old(dpc, bpc_pcd, gpc, H, W):
     bpc = pcd2pcm(bpc_pcd, H, W)
     gpc_pcd = pcm2pcd(gpc)
     if len(bpc_pcd.points) == 0:
         raise ValueError("bpc_pcd is empty, cannot proceed.")
-    bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    
     # bpc_pcd = bpc_pcd.voxel_down_sample(0.02)
-    gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
     # gpc_pcd = gpc_pcd.voxel_down_sample(0.02)
+    bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
     proj_b = project_points_multi_fast(bpc_pcd, dpc, k=8, just_proj=True)
     proj_g_pcd = unfold_surface(bpc_pcd)
     proj_g = pcd2pcm(proj_g_pcd, H, W)
@@ -1469,6 +1570,69 @@ def unfold_depth(dpc, bpc_pcd, gpc, H, W):
     unfolded_dpc = np.zeros_like(proj_g)
     gepz = np.mean(np.asarray(gpc_pcd.points)[:,2])
     bgz = np.min(np.asarray(bpc_pcd.points)[:,2])
+    for i in range(dpc.shape[0]):
+        for j in range(dpc.shape[1]):
+            unfolded_dpc[i, j, 0] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 0]
+            unfolded_dpc[i, j, 1] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 1]
+            unfolded_dpc[i, j, 2] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 2] + dist[i,j,0]
+            unfolded_dpc[i, j, 2] += gepz - bgz
+    
+    return unfolded_dpc
+
+# def unfold_depth(dpc, bpc_pcd, bpc_ctrl, gpc, H, W):
+#     bpc = pcd2pcm(bpc_pcd, H, W)
+#     gpc_pcd = pcm2pcd(gpc)
+#     if len(bpc_pcd.points) == 0:
+#         raise ValueError("bpc_pcd is empty, cannot proceed.")
+    
+#     bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+#     gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+
+#     bpc_mesh = bspline_surface_mesh_from_ctrl(bpc_ctrl,20,20,40,40)
+#     proj_b_pcdarr = project_external_along_normals_noreject(dpc.reshape(-1, 3), bpc_mesh)
+#     proj_b = pcdArr2pcm(proj_b_pcdarr, H,W)
+#     proj_g_pcd = unfold_surface(bpc_pcd)
+#     proj_g = pcd2pcm(proj_g_pcd, H, W)
+#     proj_b_idx = map_pc_proj_to_index(proj_b, bpc) # H * W * 2
+#     proj_b_idx_i = np.int32(proj_b_idx)
+#     dist = euclidean_distance_map(dpc, proj_b)     # H * W * 1
+#     unfolded_dpc = np.zeros_like(proj_g)
+#     gepz = np.mean(np.asarray(gpc_pcd.points)[:,2])
+#     bgz = np.min(np.asarray(bpc_pcd.points)[:,2])
+#     for i in range(dpc.shape[0]):
+#         for j in range(dpc.shape[1]):
+#             unfolded_dpc[i, j, 0] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 0]
+#             unfolded_dpc[i, j, 1] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 1]
+#             unfolded_dpc[i, j, 2] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 2] + dist[i,j,0]
+#             unfolded_dpc[i, j, 2] += gepz - bgz
+    
+#     return unfolded_dpc
+def unfold_depth(dpc, bpc_pcd, H, W, bpc_ctrl=None, gpc=None):
+    bpc = pcd2pcm(bpc_pcd, H, W)
+    if gpc is not None:
+        gpc_pcd = pcm2pcd(gpc)
+        gpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    if len(bpc_pcd.points) == 0:
+        raise ValueError("bpc_pcd is empty, cannot proceed.")
+    
+    bpc_pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    if bpc_ctrl is None:
+        bpc_ctrl = fit_ctrl_grid_from_point_cloud(bpc_pcd, grid_w=20, grid_h=20, k_neighbors=10)
+
+    bpc_mesh = bspline_surface_mesh_from_ctrl(bpc_ctrl,20,20,40,40)
+    proj_b_pcdarr = project_external_along_normals_noreject(dpc.reshape(-1, 3), bpc_mesh)
+    proj_b = pcdArr2pcm(proj_b_pcdarr, H,W)
+    proj_g_pcd = unfold_surface(bpc_pcd)
+    proj_g = pcd2pcm(proj_g_pcd, H, W)
+    proj_b_idx = map_pc_proj_to_index(proj_b, bpc) # H * W * 2
+    proj_b_idx_i = np.int32(proj_b_idx)
+    dist = euclidean_distance_map(dpc, proj_b)     # H * W * 1
+    unfolded_dpc = np.zeros_like(proj_g)
+    bgz = np.min(np.asarray(bpc_pcd.points)[:,2])
+    if gpc is not None:
+        gepz = np.mean(np.asarray(gpc_pcd.points)[:,2])
+    else:
+        gepz = bgz
     for i in range(dpc.shape[0]):
         for j in range(dpc.shape[1]):
             unfolded_dpc[i, j, 0] = proj_g[proj_b_idx_i[i,j,0], proj_b_idx_i[i,j,1], 0]
@@ -1623,8 +1787,6 @@ def downsample_pcm(pcm: np.ndarray, W_final: int) -> np.ndarray:
     pcm_down = cv2.resize(pcm, (W_final, H_final), interpolation=cv2.INTER_AREA)
 
     return pcm_down
-
-
 
 def _kdt_from_points(pts: np.ndarray) -> o3d.geometry.KDTreeFlann:
     pc = o3d.geometry.PointCloud()
@@ -1941,3 +2103,293 @@ def unfold_surface(
         out.normals = pcd.normals
 
     return out
+
+def _pcd2xyz_grid(pcd: o3d.geometry.PointCloud, H: int, W: int) -> np.ndarray:
+    """Convert an Open3D point cloud with H*W points (row-major) into an H×W×3 array."""
+    pts = np.asarray(pcd.points, dtype=np.float64)
+    if pts.shape[0] != H * W:
+        raise ValueError(f"Point cloud has {pts.shape[0]} points, expected {H*W}.")
+    return pts.reshape(H, W, 3)
+
+def _xyz_grid2pcd(xyz: np.ndarray) -> o3d.geometry.PointCloud:
+    """Convert an H×W×3 array back to an Open3D point cloud."""
+    out = o3d.geometry.PointCloud()
+    out.points = o3d.utility.Vector3dVector(xyz.reshape(-1, 3))
+    return out
+
+def _polygon_signed_area(poly_xy: np.ndarray) -> float:
+    """Twice the signed area (positive=CCW) of a closed polygon given as (N,2)."""
+    s = 0.0
+    for i in range(len(poly_xy)):
+        x1, y1 = poly_xy[i]
+        x2, y2 = poly_xy[(i + 1) % len(poly_xy)]
+        s += x1 * y2 - x2 * y1
+    return s
+
+def _order_quad_tl_tr_br_bl(pts4_xy: np.ndarray) -> np.ndarray:
+    """
+    Order 4 XY points robustly to [TL, TR, BR, BL].
+    Steps:
+      1) Sort CCW around centroid
+      2) Rotate so the first is TL (min y, then min x)
+      3) Ensure clockwise order (TL,TR,BR,BL)
+    """
+    if pts4_xy.shape != (4, 2):
+        raise ValueError("four_points must be (4,2) array-like of XY.")
+    P = np.asarray(pts4_xy, dtype=np.float64)
+
+    c = P.mean(axis=0)
+    ang = np.arctan2(P[:, 1] - c[1], P[:, 0] - c[0])
+    P_ccw = P[np.argsort(ang)]  # CCW around centroid
+
+    # make first = TL by (y,x)
+    tl_idx = np.lexsort((P_ccw[:, 0], P_ccw[:, 1]))[0]
+    P_ccw = np.roll(P_ccw, -tl_idx, axis=0)
+
+    # ensure clockwise order for TL,TR,BR,BL
+    if _polygon_signed_area(P_ccw) > 0:  # CCW -> flip to CW
+        P_ccw = P_ccw[[0, 3, 2, 1]]
+
+    return P_ccw  # TL, TR, BR, BL
+
+def _bilinear_xy_in_quad(quad_xy_tl_tr_br_bl: np.ndarray, H: int, W: int) -> np.ndarray:
+    """
+    Bilinear interpolation inside quadrilateral:
+      P00=TL, P10=TR, P11=BR, P01=BL.
+      X(s,t) = (1-s)(1-t)P00 + s(1-t)P10 + s t P11 + (1-s)t P01
+      s in [0,1] across columns, t in [0,1] across rows.
+    """
+    P00, P10, P11, P01 = quad_xy_tl_tr_br_bl
+
+    s = np.linspace(0.0, 1.0, W, dtype=np.float64)  # columns
+    t = np.linspace(0.0, 1.0, H, dtype=np.float64)  # rows
+    S, T = np.meshgrid(s, t)  # (H,W)
+
+    one_s, one_t = 1.0 - S, 1.0 - T
+    term00 = (one_s * one_t)[..., None] * P00
+    term10 = (S * one_t)[..., None] * P10
+    term11 = (S * T)[..., None] * P11
+    term01 = (one_s * T)[..., None] * P01
+    XY = term00 + term10 + term11 + term01  # (H,W,2)
+    return XY
+
+def reshape_in_polygon(
+    four_points: Iterable[Tuple[float, float]],
+    pcd: o3d.geometry.PointCloud,
+    H: int,
+    W: int,
+) -> o3d.geometry.PointCloud:
+    """
+    Warp the H×W grid of points from 'pcd' so that its XY lies bilinearly inside
+    the given 4-point polygon; preserve Z point-wise.
+
+    Parameters
+    ----------
+    four_points : iterable of 4 (x,y)
+        Polygon corners in any order. Auto-ordered to TL,TR,BR,BL.
+    pcd : o3d.geometry.PointCloud
+        Input cloud with exactly H*W points in row-major order.
+    H, W : int
+        Grid height and width.
+
+    Returns
+    -------
+    o3d.geometry.PointCloud
+        Reshaped cloud.
+    """
+    xyz = _pcd2xyz_grid(pcd, H, W)    # (H,W,3)
+    z_vals = xyz[..., 2].copy()
+
+    quad_xy_in = np.asarray(list(four_points), dtype=np.float64).reshape(4, 2)
+    quad_xy = _order_quad_tl_tr_br_bl(quad_xy_in)     # TL,TR,BR,BL
+
+    XY = _bilinear_xy_in_quad(quad_xy, H, W)          # (H,W,2)
+    warped = np.dstack([XY, z_vals])                  # (H,W,3)
+    
+    return _xyz_grid2pcd(warped)
+
+def intersect_rays_with_spline(mesh: o3d.geometry.TriangleMesh,
+                               origins,
+                               dirs):
+    """
+    Intersect rays with the given triangle mesh using Open3D RaycastingScene.
+
+    Args:
+        mesh:   Open3D legacy TriangleMesh
+        origins: (N, 3) ray origins
+        dirs:    (N, 3) ray directions (not necessarily normalized)
+
+    Returns:
+        t_mesh: (N,) distances along ray to the first hit.
+                For rays that miss, value is np.inf.
+        p_mesh: (N, 3) intersection points in 3D.
+                For rays that miss, row is np.nan.
+    """
+    mesh_t = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+    scene = o3d.t.geometry.RaycastingScene()
+    _ = scene.add_triangles(mesh_t)
+
+    origins = np.asarray(origins, dtype=float)
+    dirs = np.asarray(dirs, dtype=float)
+
+    rays = np.concatenate([origins, dirs], axis=1).astype(np.float32)
+    rays_o3d = o3d.core.Tensor(rays, dtype=o3d.core.Dtype.Float32)
+
+    ans = scene.cast_rays(rays_o3d)
+    t_hit = ans["t_hit"].numpy().reshape(-1)  # original distances from Open3D
+
+    # Clean up t values: invalid or behind origin -> inf
+    t_mesh = np.array(t_hit, dtype=float)
+    invalid = (~np.isfinite(t_mesh)) | (t_mesh <= 0.0)
+    t_mesh[invalid] = np.inf
+
+    # Compute intersection points, put NaN where there is no hit
+    p_mesh = origins + dirs * t_mesh[:, None]
+    p_mesh[~np.isfinite(t_mesh), :] = np.nan
+
+    return t_mesh, p_mesh
+
+def intersect_rays_with_xy_plane(origins, dirs, plane_z):
+    """
+    Intersect rays with the XY-parallel plane z = plane_z.
+
+    Args:
+        origins: (N, 3)
+        dirs:    (N, 3) ray directions (typically normalized, but not required)
+        plane_z: scalar z value of plane
+
+    Returns:
+        t_plane: (N,) distances along ray (>=0) where intersection occurs.
+                 For rays that do not hit the plane in front of the origin,
+                 the distance is np.inf.
+        p_plane: (N, 3) intersection points in 3D.
+                 For rays that miss, row is np.nan.
+    """
+    origins = np.asarray(origins, dtype=float)
+    dirs = np.asarray(dirs, dtype=float)
+
+    z0 = origins[:, 2]
+    dz = dirs[:, 2]
+
+    eps = 1e-8
+    t_plane = np.full(dz.shape, np.inf, dtype=float)
+
+    valid = np.abs(dz) > eps
+    t_plane[valid] = (plane_z - z0[valid]) / dz[valid]
+
+    # Only intersections in front of the origin (t > 0)
+    invalid = (~np.isfinite(t_plane)) | (t_plane <= 0.0)
+    t_plane[invalid] = np.inf
+
+    # Intersection points; NaN where no hit
+    p_plane = origins + dirs * t_plane[:, None]
+    p_plane[~np.isfinite(t_plane), :] = np.nan
+
+    return t_plane, p_plane
+
+def build_camera_rays(img_h, img_w, hfov_deg, pose, pyramidProj=False):
+    """
+    Build ray origins and directions in world/NWU frame.
+
+    Origins are all at (0,0,0) and directions come from calcCameraDirs.
+
+    Returns:
+        origins: (N, 3)
+        dirs:    (N, 3), unit-length directions
+    """
+    dirs = calcCameraDirs(
+        shape=(img_h, img_w),
+        hfov_deg=hfov_deg,
+        pyramidProj=pyramidProj,
+        pose=pose,
+        do_rotate=True
+    )  # (H, W, 3)
+    dirs_flat = dirs.reshape(-1, 3)
+
+    # Normalize directions
+    norms = np.linalg.norm(dirs_flat, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    dirs_flat /= norms
+
+    origins = np.zeros_like(dirs_flat)  # all rays start from origin (0,0,0)
+    return origins, dirs_flat
+
+def calc_ratio_map(pcd,
+                   pose,
+                   img_h: int,
+                   img_w: int,
+                   hfov_deg: float,
+                   grid_w: int = 20,
+                   grid_h: int = 20,
+                   su: int = 200,
+                   sv: int = 200,
+                   k_neighbors: int = 10) -> np.ndarray:
+    """
+    Compute an (img_h x img_w) ratio map R for the given point cloud.
+
+    The XY-parallel plane used is z = min_z of the input point cloud.
+
+    For each pixel / ray:
+        R = (distance from origin to green point on that ray + hh) /
+            (distance from origin to red point on that ray)
+
+    where:
+      - green point = intersection with plane z = min_z(pcd)
+      - red point   = intersection with fitted spline surface
+
+    Rays that don't hit both (in front of origin) get NaN.
+
+    Returns:
+        ratio_map: (img_h, img_w) array of R
+        plane_pts: (img_h * img_w, 3) intersection points on the plane
+                   (rows are NaN for rays that miss)
+    """
+    # 1) Load point cloud
+    pts = np.asarray(pcd.points, dtype=float)
+    if pts.shape[0] == 0:
+        raise ValueError("Point cloud is empty.")
+
+    # XY-parallel plane at min-z of input PCD
+    plane_z = float(pts[:, 2].min())
+
+    # 2) Fit control grid & build spline surface mesh
+    ctrl_flat = fit_ctrl_grid_from_point_cloud(
+        pcd, grid_w=grid_w, grid_h=grid_h, k_neighbors=k_neighbors
+    )
+    spline_mesh = bspline_surface_mesh_from_ctrl(
+        ctrl_flat, grid_w=grid_w, grid_h=grid_h, su=su, sv=sv
+    )
+
+    # 3) Build rays from origin using build_camera_rays
+    # NOTE: assumes build_camera_rays returns unit-length dirs
+    origins, dirs = build_camera_rays(
+        img_h=img_h,
+        img_w=img_w,
+        hfov_deg=hfov_deg,
+        pose=pose,
+        pyramidProj=False
+    )
+
+    # 4) Intersections with spline mesh and plane
+    t_mesh, p_mesh = intersect_rays_with_spline(spline_mesh, origins, dirs)
+    t_plane, p_plane = intersect_rays_with_xy_plane(origins, dirs, plane_z=plane_z)
+
+    # 5) Ratio map (if dirs are unit-length, distance from origin == t)
+    N = img_h * img_w
+    assert t_mesh.shape[0] == N and t_plane.shape[0] == N
+
+    ratio = np.full(N, np.nan, dtype=float)
+    valid = (
+        np.isfinite(t_mesh) &
+        np.isfinite(t_plane) &
+        (t_mesh > 0.0) &
+        (t_plane > 0.0)
+    )
+
+    ratio[valid] = (t_plane[valid]) / t_mesh[valid]
+
+    ratio_map = ratio.reshape(img_h, img_w)
+
+    # Return the plane intersection points instead of recomputing t_plane[:,None] * dirs
+    # p_plane already includes origins, i.e., p_plane = origins + dirs * t_plane
+    return ratio_map, p_plane, p_mesh

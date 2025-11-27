@@ -15,7 +15,11 @@ def main():
         e.advance.wait()
         print(f"[info] projecting the new frame: {dict['idx']} ...")
         # Generate a random point cloud and update the app
-        e.eval()
+        e.eval(dict["groundtruth"],
+               dict["source"],
+               )
+        
+        e.dry_run()
         print(f"[info] projection done and scene updated for index {dict['idx']}.")
         # Reset the advance flag
         e.advance.clear()

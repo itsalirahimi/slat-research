@@ -7,30 +7,14 @@ import open3d as o3d
 from scipy.interpolate import griddata
 import matplotlib.pyplot as plt
 import numpy as np
-from .config import Scaling
 import cv2
 
-NULL_SCALE_MIN_Z = 30.0
+NULL_SCALE_MIN_Z = -30.0
 
-def calc_scale_factor(desired_alt, scaling, pc_to_be_rescaled=None, bgz=None):
-    if scaling == Scaling.NULL:
-        assert pc_to_be_rescaled is not None
-        min_z = np.nanmin(pc_to_be_rescaled[:,:,2])
-        ret = abs(NULL_SCALE_MIN_Z / min_z)
-    elif scaling == Scaling.MIN_Z:
-        assert pc_to_be_rescaled is not None
-        min_z = np.nanmin(pc_to_be_rescaled[:,:,2])
-        ret = desired_alt / min_z
-    elif scaling == Scaling.MEAN_Z:
-        assert bgz is not None, "MEAN_Z Scaling requires bgz provided"
-        mean_z = np.mean(bgz)
-        ret = desired_alt / mean_z
-    elif scaling == Scaling.RESHAPE_BG_Z:
-        assert bgz is not None, "RESHAPE_BG_Z Scaling requires bgz provided" 
-    # assert ret > False, "Inconsistent z-axis direction in scale factor calculation"
-    # assert ret > 0, f"Invalid scale factor: {ret:.4f}"
-    # return abs(ret)
-    return ret
+def scale_pcm(this_pcd, make_this_alt, to_this_alt):
+    scale_factor = to_this_alt / make_this_alt
+    assert scale_factor > 0, f"Invalid scale factor: {scale_factor:.4f} = {to_this_alt} / {make_this_alt}"
+    return scale_factor * this_pcd
 
 def computeGeps(shape, hfov_deg, pose):
     """
@@ -83,8 +67,8 @@ def calcCameraDirs(shape, hfov_deg, pyramidProj, pose, do_rotate):
     else:
         return dirs
 
-def project3D(depth_img, pose, hfov_deg, scaling, bg=None, 
-              move=False, pyramidProj=False, do_rotate=True):
+def project3D(depth_img, pose, hfov_deg, bg=None, 
+              move=False, pyramidProj=False, do_rotate=True, do_scale=True):
     dirs = calcCameraDirs(depth_img.shape, hfov_deg, pyramidProj, pose, do_rotate)
     # Scale by depth and altitude
     pc = dirs * (depth_img[..., np.newaxis])
@@ -92,8 +76,9 @@ def project3D(depth_img, pose, hfov_deg, scaling, bg=None,
     #     sgn = -1
     # else:
     #     sgn = 1
-    scale_factor = calc_scale_factor(pose.p6.z, scaling, bgz=bg, pc_to_be_rescaled=pc)
-    pc *= scale_factor
+    if do_scale:
+        pc = scale_pcm(pc, np.nanmin(pc[:,:,2]), NULL_SCALE_MIN_Z)
+    
     if move:
         pose = np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]])
         move_const = pose.T

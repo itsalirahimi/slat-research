@@ -1,70 +1,43 @@
-
-import glob
-import json
 import os
-
-import cv2
-import numpy as np
 from ioHandle.IOHandler import IOHandler, load_pcd
-from kinematics.pose import ExtMat, Point6, Pose
 
 class FuseIO(IOHandler):
     def __init__(self):
         super().__init__()
-        assert not self.args.dst, "Invalid argument [--dst]: destination is set automatically when fusing."
-        assert self.args.bg_rad, "Must set bg_rad when fusing."
-        assert self.args.bg_can, "Must set bg_can when fusing."
+        self.source_dir = self.getSrcDir()
+        self.dataset_dir = self.source_dir.expanduser().resolve().parent.parent.parent
+        self.dst = os.path.basename(os.path.dirname(self.source_dir))
+        self.init_dataset(self.dataset_dir)
     
     def load_row(self, row):
-        if (self.cfg["kinematics"] == "CAM2NWU"):
-            extmat_path = os.path.join(self.dataset_dir, "data", "pose")
-            extmat_path = os.path.join(extmat_path, row["name"] + ".json")
-            with open(extmat_path, "r") as f:
-                extmat_d = json.load(f)
-            # extmat_data = np.loadtxt(extmat_path, delimiter=',', dtype=np.float32)
-            extmat_r = extmat_d["rotation"]#.reshape(4, 4)
-            extmat_t = np.array(extmat_d["translation"])#.reshape(4, 4)
-            extmat_data = np.hstack([extmat_r, extmat_t.reshape(3,1)])
-            extmat_data = np.vstack([extmat_data, np.array([0,0,0,1]).reshape(1,4)])
-            extmat = ExtMat(data=extmat_data)
-            p = Pose(extmat=extmat)
+
+        idx = row['index']
+        name = row["name"]
+        pose = self.get_pose(row)
         
-        elif (self.cfg["kinematics"] =="pose"):
-            p6 = Point6(x=row["x"], y=row["y"], z=row["z"], 
-                        roll=row["phi"], pitch=row["theta"], yaw=row["psi"])
-            p = Pose(p6=p6)
-        
-        target_name = row["name"]
-        pattern = os.path.join(self.source_dir, f"{target_name}.*")
-        matches = glob.glob(pattern)
+        img_dir = os.path.join(self.dataset_dir, "projection", self.dst, "rgb")
+        color_img = self.get_color_image(img_dir , name, self.cfg["rgb_extension"])
 
-        if not matches:
-            raise FileNotFoundError(f"No file found for name '{target_name}' in {self.source_dir}")
+        bg_can_dir = os.path.join(self.dataset_dir, "diffusion", self.dst, "canonical", "background")
+        bg_can = load_pcd(os.path.join(bg_can_dir, f"{name}.pcd"))
 
-        src_path = matches[0]
-        src_ext = os.path.splitext(src_path)[1]
-        if src_ext == ".pcd":
-            src = load_pcd(src_path)
-        else:
-            raise ValueError("Invalid filename extension")
-        
-        color_path = os.path.join(self.dataset_dir, "projection", self.dst,
-                                  "rgb", row["name"] + self.cfg["rgb_extension"])
-        color_img = cv2.imread(color_path)
+        bg_rad_dir = os.path.join(self.dataset_dir, "diffusion", self.dst, "radial", "background")
+        bg_rad = load_pcd(os.path.join(bg_rad_dir, f"{name}.pcd"))
 
-        bg_rad_dir = os.path.join(self.args.bg_rad)
-        bg_can_dir = os.path.join(self.args.bg_can)
+        prj_can_dir = os.path.join(self.dataset_dir, "projection", self.dst, "canonical")
+        prj_can = load_pcd(os.path.join(prj_can_dir, f"{name}.pcd"))
 
-        bg_rad = load_pcd(os.path.join(bg_rad_dir, f"{row['name']}.pcd"))
-        bg_can = load_pcd(os.path.join(bg_can_dir, f"{row['name']}.pcd"))
+        prj_rad_dir = os.path.join(self.dataset_dir, "projection", self.dst, "radial")
+        prj_rad = load_pcd(os.path.join(prj_rad_dir, f"{name}.pcd"))
 
         dic = {
-            "pose": p, 
-            "source": src, 
-            "image": color_img, 
-            "bg_rad": bg_rad,
-            "bg_can": bg_can,
-            "idx": row['index'],
-            "name": row["name"]
+            "idx": idx,
+            "name": name,
+            "pose": pose, 
+            "prj_can": prj_can, 
+            "prj_rad": prj_rad, 
+            "bg_can": bg_can, 
+            "bg_rad": bg_rad, 
+            "image": color_img,
         }
         return dic

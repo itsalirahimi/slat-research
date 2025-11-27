@@ -15,8 +15,7 @@ def main():
                          root_dir=io.getDataRootDir(),
                          dst_dir=io.getDstDir(),
                          do_save=io.getDoSave(),
-                         on_video=io.getOnVideo(),
-                         in_camera=io.getInCamera())
+                         on_video=io.getOnVideo())
     mapper = Mapper3D(cfg)
 
     # Main thread work (e.g., check advance flag and update point cloud)

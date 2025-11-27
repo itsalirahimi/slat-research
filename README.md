@@ -1,32 +1,40 @@
-
-
-
-
 ## Major Job
 ```bash
 # projection
-python3 launch/project.py --src data/ortholoc/data/metric_depth/depth_pro/ --dst test --save
-[INPUT]: metric_depth csv files in: data/ortholoc/data/metric_depth/depth_pro/
-[OUTPUT]: radial pcd files in: data/ortholoc/projection/test/radial
-[OUTPUT]: radial pcd files in: data/ortholoc/projection/test/canonical
-[OUTPUT]: radial pcd files in: data/ortholoc/projection/test/rgb
 
-# diffusion
-python3 launch/diffuse.py --src data/ortholoc/projection/test/radial/ --save --dst rad_test
-[INPUT]: radial pcd files in: data/ortholoc/projection/test/radial
-[OUTPUT]: bg pcd files in: data/ortholoc/diffusion/test/background
-[OUTPUT]: bg pcd files in: data/ortholoc/diffusion/test/mask
+# Step 1 - Post Process
+python3 lib/postproc/usegeo_1.py --raw data/usegeo_1/raw/ --out data/usegeo_1/
+# Step 1.1 - Project LiDAR (Optional)
+python3 lib/postproc/usegeo_2.py --src data/usegeo_1/eval/gt/npz_ds/
 
-# fusion
-python3 launch/fuse.py --src data/ortholoc/projection/test/radial/ --save
-# save with specific folder name
-python3 launch/fuse.py --src data/ortholoc/projection/test/radial/ --save --dst sample
-# run with specific background
-python3 launch/fuse.py --src data/ortholoc/projection/test/radial/ --save --bg_rad data/ortholoc/diffusion/rad_test/background/ --bg_can data/ortholoc/diffusion/can_test/background/
-[INPUT]: radial pcd files in: data/ortholoc/projection/test/radial
-[INPUT]: bg pcd files in: data/ortholoc/diffusion/test/background
-[OUTPUT]: pcd files in: data/ortholoc/fusion/test/fused
-[OUTPUT]: pcd files in: data/ortholoc/fusion/test/ground
+# Step 2 - gt diffusion
+python3 launch/diffuse.py --src data/usegeo_1/eval/gt/pcd_ds/ --save
+
+# Step 3 - Estimate AGL
+python3 lib/postproc/estimateAGL.py --src data/usegeo_1/diffusion/gt/background/
+
+# Step 4 - Project depth
+python3 launch/project.py --src data/usegeo_1/depth/depth_pro/ --dst test --save
+
+# Step 5 - run diffusion
+python3 launch/diffuse.py --src data/usegeo_1/projection/test/radial/ --save
+python3 launch/diffuse.py --src data/usegeo_1/projection/test/canonical/ --save
+
+
+# Step 6 - run fusion
+python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
+
+# Step 7 - evaluation
+
+
+
+
+
+
+
+
+
+
 ```
 
 Flags with help

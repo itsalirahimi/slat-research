@@ -29,15 +29,15 @@ class Mapper3D(O3DGUI):
         projected_pc, mc = project3D(metric_depth_ds, pose, self.config.hfov_deg, 
                                     move=self.config.on_video,
                                     pyramidProj=False, 
-                                    scaling=self.config.scaling,
                                     do_rotate=True)
         
         projected_pc_can, mc = project3D(metric_depth_ds, pose, self.config.hfov_deg, 
                                     move=self.config.on_video,
                                     pyramidProj=True, 
-                                    scaling=self.config.scaling,
                                     do_rotate=True)
-
+        
+        # projected_pc += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
+        # projected_pc_can += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
         _pcd = pcm2pcd(projected_pc, cimg_ds)
         _pcd_c = pcm2pcd(projected_pc_can, cimg_ds)
 
@@ -65,5 +65,3 @@ class Mapper3D(O3DGUI):
             mname = f"bgpcd_{self.it}"
             self.scene.scene.add_geometry(name, _pcd, self._mat_points(5.0))
             fit_camera(self.scene.scene, [_pcd])
-
-

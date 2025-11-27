@@ -19,8 +19,7 @@ class BGPatternFuserConfig:
     hfov_deg: float
     root_dir: str
     dst_dir: str
-    flat_mode: FlatFusionMode = FlatFusionMode.Unfold
-    in_camera: bool = False
+    flat_mode: FlatFusionMode = FlatFusionMode.NDFDrop
     visMode: VisMode = VisMode.MSingle
     do_save: bool = None
     on_video: bool = False

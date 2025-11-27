@@ -1,39 +1,29 @@
 
-import glob
 import os
-
-import cv2
-
 from ioHandle.IOHandler import IOHandler, load_pcd
 
 class DiffuseIO(IOHandler):
     def __init__(self):
         super().__init__()
-        assert self.args.dst, "Must set --dst when diffusing."
+        self.source_dir = self.getSrcDir()
+        self.dataset_dir = self.source_dir.expanduser().resolve().parent.parent.parent
+        parent = os.path.basename(self.source_dir)
+        test_name = os.path.basename(os.path.dirname(self.source_dir))
+        self.dst = test_name + "/" + parent
+        self.init_dataset(self.dataset_dir)
     
     def load_row(self, row):
-        target_name = row["name"]
-        pattern = os.path.join(self.source_dir, f"{target_name}.*")
-        matches = glob.glob(pattern)
 
-        if not matches:
-            raise FileNotFoundError(f"No file found for name '{target_name}' in {self.source_dir}")
-
-        src_path = matches[0]
-        src_ext = os.path.splitext(src_path)[1]
-
-        if src_ext == ".pcd":
-            src = load_pcd(src_path)
-        else:
-            raise ValueError("Invalid filename extension")
-        
-        color_path = os.path.join(self.source_dir, "..",
-                                  "rgb", row["name"] + self.cfg["rgb_extension"])
-        color_img = cv2.imread(color_path)
+        idx = row['index']
+        name = row["name"]
+        img_dir = os.path.join(self.source_dir, "..", "rgb")
+        color_img = self.get_color_image(img_dir , name, self.cfg["rgb_extension"])
+        projected = load_pcd(os.path.join(self.source_dir, f"{name}.pcd"))
+                
         dic = {
-            "source": src, 
-            "image": color_img, 
-            "idx": row['index'],
-            "name": row['name'],
+            "idx": idx,
+            "name": name,
+            "source": projected, 
+            "image": color_img,
         }
         return dic

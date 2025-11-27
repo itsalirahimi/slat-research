@@ -15,7 +15,6 @@ def main():
         hfov_deg=io.cfg["hfov_deg"],
         root_dir=io.getDataRootDir(),
         dst_dir=io.getDstDir(),
-        in_camera=io.getInCamera(),
         on_video=io.getOnVideo(),
         do_save=io.getDoSave(),
     )
@@ -28,7 +27,8 @@ def main():
         print(f"[info] fusing the new frame: {dict['idx']} ...")
         # Generate a random point cloud and update the app
         fuser.fuse(dict["image"],
-                   dict["source"],
+                   dict["prj_rad"],
+                   dict["prj_can"],
                    dict["bg_rad"],
                    dict["bg_can"],
                    dict["pose"],

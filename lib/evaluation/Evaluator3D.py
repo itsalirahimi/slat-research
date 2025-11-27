@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import math, json
+import math
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict
 
 import numpy as np
 import open3d as o3d
+
+import os
+import sys
+
+dir_path = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(dir_path + "/../lib")
+from utils.conversion import pcd2pcm
+from fusion.helper import calc_ratio_map
+from projection.helper import NULL_SCALE_MIN_Z, project3D, scale_pcm
 
 Reg = o3d.pipelines.registration
 # class Evaluator3D(O3DGUI):
@@ -527,6 +536,15 @@ class Evaluator3D:
         # Build and optionally save JSON report (same as before)...
         # Return the report dict as you already do.
 
+    def dry_run(self, cimg, depth, pose, hfov_deg, bg_pcd_can):
+        H, W, _ = cimg.shape
+        projected_depth, _ = project3D(depth, pose, hfov_deg, 
+            move=False, pyramidProj=False, do_rotate=True, do_scale=False)
+        bg_pcm_can = pcd2pcm(bg_pcd_can, H, W)
+        _, gep, _ = calc_ratio_map(bg_pcd_can, pose)
+        gep = scale_pcm(gep, np.mean(gep[:,:,2]), -pose.p6.z)
+
+        
 
 if __name__ == "__main__":
     # Minimal example run (edit paths as needed):

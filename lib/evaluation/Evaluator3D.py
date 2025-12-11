@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from typing import Tuple, List, Optional, Dict
+import json
 
 import numpy as np
 import open3d as o3d
@@ -12,17 +13,12 @@ import sys
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
-from utils.conversion import pcd2pcm
-from fusion.helper import calc_ratio_map
-from projection.helper import NULL_SCALE_MIN_Z, project3D, scale_pcm
+from evaluation.config import EvalConfig
+from gui.o3dgui import O3DGUI
 
 Reg = o3d.pipelines.registration
-# class Evaluator3D(O3DGUI):
-#     def __init__(self):
-#         super().__init__()
 
-
-class Evaluator3D:
+class Evaluator3D(O3DGUI):
     """
     3D point-cloud evaluator:
       - Global coarse init (scale-from-RMS + FGR/RANSAC)
@@ -42,19 +38,19 @@ class Evaluator3D:
     """
 
     # ------------- ctor / config -------------
-    def __init__(self,
-                 visualize: bool = True,
-                 cap_corr: int = 200_000,
-                 metric_voxel_frac: float = 0.0):
+    def __init__(self, config: EvalConfig):
         """
         Args:
             visualize: show Stage A/B/C windows (Open3D).
             cap_corr: max correspondences (sampled source points) per ICP iteration.
             metric_voxel_frac: optional voxel frac of bbox diag for metrics speedup (0=off).
         """
-        self.visualize = visualize
-        self.cap_corr = int(cap_corr)
-        self.metric_voxel_frac = float(metric_voxel_frac)
+        self.config = config
+        self.visualize = self.config.visualize
+        self.cap_corr = int(self.config.cap_corr)
+        self.metric_voxel_frac = float(self.config.metric_voxel_frac)
+        super().__init__(self.config.visMode)
+
 
     # ------------- IO & basics -------------
     @staticmethod
@@ -422,36 +418,23 @@ class Evaluator3D:
 
     # ------------- main API -------------
     def eval(self,
-            ref_pcd: Path | str,
-            test_pcd: Path | str,
-            save_combined: Optional[Path | str] = None,          # NEW name (combined file)
-            save_ref_path: Optional[Path | str] = "aligned_ref_red.pcd",    # NEW explicit export
-            save_test_path: Optional[Path | str] = "aligned_test_blue.pcd", # NEW explicit export
-            report_path: Optional[Path | str] = "eval_report.json",
-            depth_eval: bool = False,
-            H: Optional[int] = None,
-            W: Optional[int] = None,
-            save_plots_dir: Optional[Path | str] = None,
-            # back-compat alias: if provided, acts like save_combined
-            save_aligned: Optional[Path | str] = None) -> Dict:
+            ref: o3d.geometry.PointCloud,
+            test: o3d.geometry.PointCloud,
+            filename: str) -> Dict:
         """
         Run full evaluation.
 
         Args:
-            ref_pcd, test_pcd: PCD paths.
+            ref_pcd, test_pcd: PCD.
             save_combined: path for combined PCD (ref red + test blue). If None, skip combined.
             save_ref_path: path for red reference export. Set None to skip.
             save_test_path: path for blue test export. Set None to skip.
             report_path: JSON report path.
             depth_eval/H/W: enable orthographic depth evaluation and set image size.
-            save_plots_dir: optional dir for residual histograms.
             save_aligned: (deprecated) alias for save_combined for backward compatibility.
         Returns:
             dict report.
         """
-        # --- BEGIN: unchanged pipeline up to metrics & analysis ---
-        ref = self.load_pcd(ref_pcd)
-        test = self.load_pcd(test_pcd)
 
         if self.visualize:
             self.show("Stage A: Raw (no alignment)", ref, test)
@@ -493,79 +476,95 @@ class Evaluator3D:
         self.human_analysis(ref_m, test_m, s, R, t, shape)
         # --- END: unchanged pipeline up to metrics & analysis ---
 
-        # -------- NEW: explicit colored exports --------
-        # resolve back-compat alias
-        if save_combined is None and save_aligned is not None:
-            save_combined = save_aligned
+        # # -------- NEW: explicit colored exports --------
+        # # resolve back-compat alias
+        # if save_combined is None and save_aligned is not None:
+        #     save_combined = save_aligned
 
-        # build colored clouds
-        ref_red  = o3d.geometry.PointCloud(ref_m);  self.paint_uniform(ref_red,  (1, 0, 0))  # red
-        tst_blue = o3d.geometry.PointCloud(test_m); self.paint_uniform(tst_blue, (0, 0, 1))  # blue
+        # # build colored clouds
+        # ref_red  = o3d.geometry.PointCloud(ref_m);  self.paint_uniform(ref_red,  (1, 0, 0))  # red
+        # tst_blue = o3d.geometry.PointCloud(test_m); self.paint_uniform(tst_blue, (0, 0, 1))  # blue
 
-        saved_paths = []
+        # saved_paths = []
 
-        # explicit individual exports (default filenames provided)
-        if save_ref_path is not None:
-            save_ref_path = Path(save_ref_path)
-            save_ref_path.parent.mkdir(parents=True, exist_ok=True)
-            o3d.io.write_point_cloud(str(save_ref_path), ref_red)
-            saved_paths.append(str(save_ref_path))
+        # # explicit individual exports (default filenames provided)
+        # if save_ref_path is not None:
+        #     save_ref_path = Path(save_ref_path)
+        #     save_ref_path.parent.mkdir(parents=True, exist_ok=True)
+        #     o3d.io.write_point_cloud(str(save_ref_path), ref_red)
+        #     saved_paths.append(str(save_ref_path))
 
-        if save_test_path is not None:
-            save_test_path = Path(save_test_path)
-            save_test_path.parent.mkdir(parents=True, exist_ok=True)
-            o3d.io.write_point_cloud(str(save_test_path), tst_blue)
-            saved_paths.append(str(save_test_path))
+        # if save_test_path is not None:
+        #     save_test_path = Path(save_test_path)
+        #     save_test_path.parent.mkdir(parents=True, exist_ok=True)
+        #     o3d.io.write_point_cloud(str(save_test_path), tst_blue)
+        #     saved_paths.append(str(save_test_path))
 
-        # optional combined export (kept from before)
-        if save_combined is not None:
-            save_combined = Path(save_combined)
-            save_combined.parent.mkdir(parents=True, exist_ok=True)
-            combo = o3d.geometry.PointCloud(ref_red); combo += tst_blue
-            o3d.io.write_point_cloud(str(save_combined), combo)
-            saved_paths.append(str(save_combined))
+        # # optional combined export (kept from before)
+        # if save_combined is not None:
+        #     save_combined = Path(save_combined)
+        #     save_combined.parent.mkdir(parents=True, exist_ok=True)
+        #     combo = o3d.geometry.PointCloud(ref_red); combo += tst_blue
+        #     o3d.io.write_point_cloud(str(save_combined), combo)
+        #     saved_paths.append(str(save_combined))
 
-        if saved_paths:
-            print("\nSaved colored PCDs →")
-            for p in saved_paths:
-                print("  ", p)
+        # if saved_paths:
+        #     print("\nSaved colored PCDs →")
+        #     for p in saved_paths:
+        #         print("  ", p)
 
-        # -------- (optional) residual histograms, depth eval, and JSON report --------
-        # (leave your existing code here unchanged)
+        report = {
+            "scale": float(s),
+            "rotation_matrix": R.tolist(),
+            "translation": t.tolist(),
+            "scale_error_abs": float(scale_err),
+            "rot_error_deg": float(rot_err),
+            "trans_error_m": float(trans_err),
+            "metrics": {
+                "RMSE_XtoY_m": shape["RMSE_XtoY_m"],
+                "Chamfer2_sym_m2": shape["Chamfer2_sym_m2"],
+                "Hausdorff_sym_m": shape["Hausdorff_sym_m"],
+                "by_threshold": shape["by_threshold"],
+                "quantiles_test_to_ref": shape["quantiles_test_to_ref"],
+                "quantiles_ref_to_test": shape["quantiles_ref_to_test"]
+            }
+        }
+        
 
-        # Build and optionally save JSON report (same as before)...
-        # Return the report dict as you already do.
-
-    def dry_run(self, cimg, depth, pose, hfov_deg, bg_pcd_can):
-        H, W, _ = cimg.shape
-        projected_depth, _ = project3D(depth, pose, hfov_deg, 
-            move=False, pyramidProj=False, do_rotate=True, do_scale=False)
-        bg_pcm_can = pcd2pcm(bg_pcd_can, H, W)
-        _, gep, _ = calc_ratio_map(bg_pcd_can, pose)
-        gep = scale_pcm(gep, np.mean(gep[:,:,2]), -pose.p6.z)
+        # ======== Write to disk ========
+        report_path = os.path.join(self.config.eval_dir, f"{filename}.json")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.config.do_save:
+            with open(report_path, "w") as f:
+                json.dump(report, f, indent=2)
+            print("Report saved:", str(report_path))
 
         
 
-if __name__ == "__main__":
-    # Minimal example run (edit paths as needed):
-    ev = Evaluator3D(visualize=False, cap_corr=200_000, metric_voxel_frac=0.0)
+# if __name__ == "__main__":
+#     # Minimal example run (edit paths as needed):
+#     ev = Evaluator3D(visualize=True, cap_corr=200_000, metric_voxel_frac=0.0)
 
-    _ = ev.eval(
-        ref_pcd="/home/ali/repos/OrthoLoc/az/pcd/L08_R0000.pcd",
-        test_pcd="/home/ali/repos/slat-research/data/ortholoc/fusion/fusedproj_1.pcd",
+#     # --- BEGIN: unchanged pipeline up to metrics & analysis ---
+#     # ref = self.load_pcd(ref_pcd)
+#     # test = self.load_pcd(test_pcd)
+#     _ = ev.eval(
+#         ref_pcd="gt1.pcd",
+#         test_pcd="fused1.pcd",
 
-        # explicit colored exports
-        save_ref_path="out/aligned_ref_red.pcd",
-        save_test_path="out/aligned_test_blue.pcd",
+#         # explicit colored exports
+#         # save_ref_path="out/aligned_ref_red.pcd",
+#         # save_test_path="out/aligned_test_blue.pcd",
 
-        # optional combined export (ref red + test blue together)
-        save_combined="out/aligned_combined.pcd",
+#         # optional combined export (ref red + test blue together)
+#         # save_combined="out/aligned_combined.pcd",
 
-        # JSON report
-        report_path="out/eval_report.json",
+#         # JSON report
+#         # report_path="out/eval_report.json",
 
-        # Depth evaluation (orthographic Z):
-        depth_eval=False  # set True and provide H/W to enable
-        # , H=1024, W=1024
-        # , save_plots_dir="out/residual_plots"  # optional histograms
-    )
+#         # Depth evaluation (orthographic Z):
+#         # depth_eval=False  # set True and provide H/W to enable
+#         # , H=1024, W=1024
+#         # , save_plots_dir="out/residual_plots"  # optional histograms
+#         filename="aa"
+#     )

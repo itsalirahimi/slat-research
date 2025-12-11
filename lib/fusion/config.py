@@ -28,5 +28,6 @@ class BGPatternFuserConfig:
     def __post_init__(self):
         self.fusion_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "fused")
         self.gep_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "ground")
+        self.rm_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "ratiomap")
         ensure_dir(self.fusion_dir)
         ensure_dir(self.gep_dir)

@@ -5,13 +5,11 @@ import open3d as o3d
 from geom.surfaces import bspline_surface_mesh_from_ctrl
 from gui.o3dgui import O3DGUI
 from ioHandle.IOHandler import load_pcd, save_pcd, save_pcm_as_pcd
-from kinematics.clouds import apply_transform_points, orient_point_cloud_cgplane_global
-from utils.o3dviz import fit_camera, mat_mesh, viz_pcd
+from utils.o3dviz import fit_camera
 from .config import BGPatternFuserConfig, FlatFusionMode
 from .helper import build_camera_rays, calc_ratio_map, fit_ctrl_grid_from_point_cloud, intersect_rays_with_spline, unfold_depth, drop_depth, NDFDrop_depth, calc_ground_depth, \
-    depyramidize_pointCloud, downsample_pcm
-from projection.helper import project3D, NULL_SCALE_MIN_Z, computeGeps, resize_keep_ar, scale_pcm
-from geom.rectification import rectify_xy_proj
+    depyramidize_pointCloud
+from projection.helper import project3D, NULL_SCALE_MIN_Z, computeGeps, scale_pcm
 from utils.conversion import pcd2pcm, pcdArr2pcd, pcm2pcd, pcm2pcdArr, pcdArr2pcm
 from projection.config import VisMode
 import open3d.visualization.rendering as rendering
@@ -74,9 +72,11 @@ class BGPatternFuser(O3DGUI):
         # ======== Write to disk ========
         _filename_fuse = os.path.join(self.config.fusion_dir, f"{filename}.pcd")
         _filename_gep = os.path.join(self.config.gep_dir, f"{filename}.pcd")
+        _filename_rm = os.path.join(self.config.rm_dir, f"{filename}.csv")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_fuse)
             save_pcd(np.asarray(_pcd_gep.points), np.asarray(_pcd.colors), filepath=_filename_gep)
+            np.savetxt(_filename_rm, ratio_map, delimiter=",")
             print(f"Wrote pcd file on {_filename_fuse}")
 
         # ======== Visualize ========

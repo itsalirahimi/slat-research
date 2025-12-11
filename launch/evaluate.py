@@ -2,22 +2,33 @@ import os
 import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../lib")
-from projection.mapper3D import Evaluator3D
-from ioHandle.IOHandler import IOHandler
+from evaluation.Evaluator3D import Evaluator3D
+from evaluation.config import EvalConfig
+from ioHandle.EvalIO import EvalIO
 
 def main():
-    io = IOHandler(True)
+    io = EvalIO()
 
-    e = Evaluator3D()
+    cfg = EvalConfig(
+                    root_dir=io.getDataRootDir(),
+                    dst_dir=io.getDstDir(),
+                    do_save=io.getDoSave(),
+                    on_video=io.getOnVideo())
+
+    e = Evaluator3D(cfg)
+
+    
 
     for dict in io.load():
         # Wait until the flag is set
         e.advance.wait()
         print(f"[info] projecting the new frame: {dict['idx']} ...")
-        # Generate a random point cloud and update the app
-        e.eval(dict["groundtruth"],
-               dict["source"],
-               )
+        e.eval(
+            ref=dict["groundtruth"],
+            test=dict["fused"],
+            filename=dict["name"],
+            depth_eval=False
+        )
         
         e.dry_run()
         print(f"[info] projection done and scene updated for index {dict['idx']}.")

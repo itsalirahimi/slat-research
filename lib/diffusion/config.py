@@ -36,8 +36,10 @@ class BGPatternDiffuserConfig:
     def __post_init__(self):
         self.diffusion_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "background")
         self.mask_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "mask")
+        self.mbg_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "metric_bg")
         ensure_dir(self.diffusion_dir)
         ensure_dir(self.mask_dir)
+        ensure_dir(self.mbg_dir)
         # Enforce valid verbosity value
         allowed_verbosity = ["tiny", "none", "full"]
         if self.verbosity not in allowed_verbosity:

@@ -10,7 +10,7 @@ from .config import BGPatternFuserConfig, FlatFusionMode
 from .helper import build_camera_rays, calc_ratio_map, fit_ctrl_grid_from_point_cloud, intersect_rays_with_spline, unfold_depth, drop_depth, NDFDrop_depth, calc_ground_depth, \
     depyramidize_pointCloud
 from projection.helper import project3D, NULL_SCALE_MIN_Z, computeGeps, scale_pcm
-from utils.conversion import pcd2pcm, pcdArr2pcd, pcm2pcd, pcm2pcdArr, pcdArr2pcm
+from utils.conversion import pcd2pcm, pcdArr2pcd, pcd2hw1, pcm2pcd, pcm2pcdArr, pcdArr2pcm
 from projection.config import VisMode
 import open3d.visualization.rendering as rendering
 
@@ -32,8 +32,9 @@ class BGPatternFuser(O3DGUI):
     def fuse(self, cimg, prj_pcd_rad, prj_pcd_can, bg_pcd_rad, bg_pcd_can, pose, filename):
         H, W, _ = cimg.shape
         ratio_map, gep, _ = calc_ratio_map(bg_pcd_can, pose, H, W, self.config.hfov_deg)
+        ratio_map = ratio_map[..., np.newaxis]      # (H, W, 1)
         prj_pcm_can = pcd2pcm(prj_pcd_can, H, W)
-        tilt_biased_bg = prj_pcm_can * (ratio_map[..., np.newaxis])
+        tilt_biased_bg = prj_pcm_can * ratio_map
 
         # bg_rad_ctrl = fit_ctrl_grid_from_point_cloud(
         #     bg_pcd_rad, grid_w=20, grid_h=20, k_neighbors=10
@@ -66,17 +67,22 @@ class BGPatternFuser(O3DGUI):
         gep_pcm = pcdArr2pcm(gep, H, W)
         gep = scale_pcm(gep, np.mean(gep_pcm[:,:,2]), -pose.p6.z)
 
+
         _pcd = pcm2pcd(fused_pcm_nwu, cimg)
         _pcd_gep = pcdArr2pcd(gep)
+        _gep_norm = pcd2hw1(_pcd_gep, H, W)
 
         # ======== Write to disk ========
         _filename_fuse = os.path.join(self.config.fusion_dir, f"{filename}.pcd")
         _filename_gep = os.path.join(self.config.gep_dir, f"{filename}.pcd")
-        _filename_rm = os.path.join(self.config.rm_dir, f"{filename}.csv")
+        _filename_rm = os.path.join(self.config.rm_dir, f"{filename}.npy")
+        _filename_mgep = os.path.join(self.config.mgep_dir, f"{filename}.npy")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_fuse)
             save_pcd(np.asarray(_pcd_gep.points), np.asarray(_pcd.colors), filepath=_filename_gep)
-            np.savetxt(_filename_rm, ratio_map, delimiter=",")
+            np.save(_filename_rm, ratio_map)
+            np.save(_filename_mgep, _gep_norm)
+
             print(f"Wrote pcd file on {_filename_fuse}")
 
         # ======== Visualize ========

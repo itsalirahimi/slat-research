@@ -108,3 +108,9 @@ def pcdArr2pcm(pts: ArrayLike, H: int, W: int) -> np.ndarray:
     # Reshape into image-like grid
     pcm = pts.reshape((H, W, 3))
     return pcm
+
+def pcd2hw1(pcd: o3d.geometry.PointCloud, H: int, W: int) -> np.ndarray:
+    _pcm = pcd2pcm(pcd, H, W)
+    _norm = np.linalg.norm(_pcm, axis=2)    # (H, W)
+    _norm = _norm[..., np.newaxis]          # (H, W, 1)
+    return _norm

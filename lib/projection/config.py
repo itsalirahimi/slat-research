@@ -29,8 +29,11 @@ class Mapper3DConfig:
         self.radial_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "radial")
         self.rgb_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "rgb")
         self.canonical_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "canonical")
+        self.mdepth_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "metric_depth")
         ensure_dir(self.radial_dir)
         ensure_dir(self.canonical_dir)
         ensure_dir(self.rgb_dir)
+        ensure_dir(self.mdepth_dir)
+        
         if self.on_video:
             self.visMode = VisMode.MAccum

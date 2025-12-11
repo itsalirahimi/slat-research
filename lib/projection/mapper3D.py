@@ -35,20 +35,26 @@ class Mapper3D(O3DGUI):
                                     move=self.config.on_video,
                                     pyramidProj=True, 
                                     do_rotate=True)
+        
+        # For evaluation we need scaled projection
         projected_pc_can = scale_pcm(projected_pc_can, np.nanmin(projected_pc_can[:,:,2]), -pose.p6.z)
         # projected_pc += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
         # projected_pc_can += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
+
         _pcd = pcm2pcd(projected_pc, cimg_ds)
         _pcd_c = pcm2pcd(projected_pc_can, cimg_ds)
 
         # ======== Write to disk ========
         _filename_radial = os.path.join(self.config.radial_dir, f"{filename}.pcd")
         _filename_canonical = os.path.join(self.config.canonical_dir, f"{filename}.pcd")
-        _filename_img = os.path.join(self.config.rgb_dir, f"{filename}.png")
+        _filename_imgds = os.path.join(self.config.rgb_dir, f"{filename}.png")
+        _filename_mdepthds = os.path.join(self.config.mdepth_dir, f"{filename}.npy")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_radial)
             save_pcd(np.asarray(_pcd_c.points), np.asarray(_pcd_c.colors), filepath=_filename_canonical)
-            cv2.imwrite(_filename_img, cimg_ds)
+            cv2.imwrite(_filename_imgds, cimg_ds)
+            np.save(_filename_mdepthds, metric_depth_ds)
+
             print(f"Wrote pcd file on {_filename_radial}")
 
         # ======== Visualize ========

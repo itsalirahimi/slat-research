@@ -24,10 +24,12 @@ class BGPatternFuserConfig:
     do_save: bool = None
     on_video: bool = False
 
-
     def __post_init__(self):
         self.fusion_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "fused")
         self.gep_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "ground")
+        self.mgep_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "metric_ground")
         self.rm_dir = os.path.join(self.root_dir, "fusion", self.dst_dir, "ratiomap")
         ensure_dir(self.fusion_dir)
         ensure_dir(self.gep_dir)
+        ensure_dir(self.mgep_dir)
+        ensure_dir(self.rm_dir)

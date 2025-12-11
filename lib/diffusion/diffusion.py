@@ -9,7 +9,7 @@ from fusion.helper import compute_center_of_mass
 from geom.surfaces import cg_centeric_xy_spline, bspline_surface_mesh_from_ctrl, \
     project_external_along_normals_noreject
 from projection.helper import project3D
-from utils.conversion import pcm2pcd, pcd2pcdArr, pcdArr2pcd, pcm2pcdArr
+from utils.conversion import pcd2hw1, pcm2pcd, pcd2pcdArr, pcdArr2pcd, pcm2pcdArr
 # from utils.o3dviz import visualize_spline_mesh
 from .tunning import Optimizer
 from .scoring import Projection3DScorer
@@ -61,6 +61,7 @@ class BGPatternDiffuser:
 
     def diffuse(self, data, cimg, name, idx):
         rd_pcd_cam = data
+        H, W, _ = cimg.shape
         print(f" =============== [BGPatternDiffuser] Diffusing on index {idx}")
         t0 = time.time()
         rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_cam)
@@ -169,10 +170,17 @@ class BGPatternDiffuser:
         bg_pts = bg_pc_arr_cam[bgmask]
         colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
         colors[:,0] = 1
+        mask = mask2image(bgmask, H, W)
+        _bg_pcd = pcdArr2pcd(bg_pts, colors)
+        _bg_norm = pcd2hw1(_bg_pcd, H, W)
+        # ======== Write to disk ========
         _filename_diffusion = os.path.join(self.config.diffusion_dir, f"{name}.pcd")
         _filename_mask = os.path.join(self.config.mask_dir, f"{name}.png")
-        save_pcd(bg_pc_arr_cam, colors, _filename_diffusion)
-        H, W, _ = cimg.shape
-        mask = mask2image(bgmask, H, W)
-        cv2.imwrite(_filename_mask, mask)
-        print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {_filename_diffusion}. Time: {(time.time() - t0):.2f} sec")
+        _filename_mbg = os.path.join(self.config.mbg_dir, f"{name}.npy")
+        if self.config.do_save:
+            save_pcd(np.asarray(_bg_pcd.points), np.asarray(_bg_pcd.colors), filepath=_filename_diffusion)
+            cv2.imwrite(_filename_mask, mask)
+            np.save(_filename_mbg, _bg_norm)
+
+
+            print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {_filename_diffusion}. Time: {(time.time() - t0):.2f} sec")

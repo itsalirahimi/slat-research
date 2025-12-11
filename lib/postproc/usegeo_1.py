@@ -143,7 +143,7 @@ def find_image_for_stem(images_dir: str, stem: str) -> str | None:
 
 def main():
     ap = argparse.ArgumentParser(description="Usegeo Batch-converter")
-    ap.add_argument("--raw", required=True, help="Raw data path containing depth_maps, undistorted_images and Image_orientations_dataset1.xyz")
+    ap.add_argument("--raw", required=True, help="Raw data path containing depth_maps, undistorted_images and Image_orientations_dataset.xyz")
     ap.add_argument("--out", required=True, help="Output directory")
     args = ap.parse_args()
 
@@ -154,7 +154,7 @@ def main():
 
     depth_dir = os.path.join(raw_root, "depth_maps")
     images_dir = os.path.join(raw_root, "undistorted_images")
-    orient_path = os.path.join(raw_root, "Image_orientations_dataset1.xyz")
+    orient_path = os.path.join(raw_root, "Image_orientations_dataset.xyz")
 
     # Output dirs
     csv_dir = os.path.join(out_root, "eval", "gt", "csv")

@@ -37,7 +37,8 @@ class Mapper3D(O3DGUI):
                                     do_rotate=True)
         
         # For evaluation we need scaled projection
-        projected_pc_can = scale_pcm(projected_pc_can, np.nanmin(projected_pc_can[:,:,2]), -pose.p6.z)
+        # projected_pc_can = scale_pcm(projected_pc_can, np.nanmin(projected_pc_can[:,:,2]), -pose.p6.z)
+
         # projected_pc += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
         # projected_pc_can += np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]]).T
 

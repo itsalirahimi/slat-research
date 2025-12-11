@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 def prepare_file_system(base_path: str, name: str) -> Path:
@@ -28,4 +29,7 @@ def prepare_file_system(base_path: str, name: str) -> Path:
     return root
 
 if __name__ == "__main__":
-    root = prepare_file_system("data/", "usegeo_1")
+    ap = argparse.ArgumentParser(description="Create base folders")
+    ap.add_argument("--name", required=True, help="database name")
+    args = ap.parse_args()
+    root = prepare_file_system("data/", args.name)

@@ -2,29 +2,38 @@
 ```bash
 # projection
 
-# Step 1 - Post Process
+# -------------Step 1 - Post Process
+# first run: to create base folders in data/usegeo_1
+python3 lib/postproc/base.py --name usegeo_1
+
+# Then move Depth_resized/depth_maps and Depth_resized/undistorted_images to /raw 
+# remove "_depth_res" from .tiff files and remove "_res" from .jpg files
+# move Image_orientations_dataset[NUMBER].xyz to raw/Image_orientations_dataset.xyz
+
+# This launch file create what we need from raw data of usegeo
 python3 lib/postproc/usegeo_1.py --raw data/usegeo_1/raw/ --out data/usegeo_1/
-# Step 1.1 - Project LiDAR (Optional)
+# Project LiDAR (write eval/gt/pcd_ds)
 python3 lib/postproc/usegeo_2.py --src data/usegeo_1/eval/gt/npz_ds/
 
-# Step 2 - gt diffusion
+
+# -------------Step 2 - gt diffusion (write diffusion/gt/pcd_ds)
 python3 launch/diffuse.py --src data/usegeo_1/eval/gt/pcd_ds/ --save
 
-# Step 3 - Estimate AGL
-python3 lib/postproc/estimateAGL.py --src data/usegeo_1/diffusion/gt/background/
+# -------------Step 3 - Estimate AGL (overwrite agl on data.json)
+python3 lib/postproc/estimateAGL.py --src data/usegeo_1/diffusion/gt/pcd_ds/background/
 
-# Step 4 - Project depth
+# -------------Step 4 - Project depth
 python3 launch/project.py --src data/usegeo_1/depth/depth_pro/ --dst test --save
 
-# Step 5 - run diffusion
+# -------------Step 5 - run diffusion
 python3 launch/diffuse.py --src data/usegeo_1/projection/test/radial/ --save
 python3 launch/diffuse.py --src data/usegeo_1/projection/test/canonical/ --save
 
 
-# Step 6 - run fusion
+# -------------Step 6 - run fusion
 python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
 
-# Step 7 - evaluation
+# -------------Step 7 - evaluation
 
 
 
@@ -36,6 +45,20 @@ python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
 
 
 ```
+
+```bash
+# OUTPUTS
+[RGB]      [.png] Location: data/usegeo_1/eval/gt/rgb/
+[GT]       [.pcd] Location: data/usegeo_1/eval/gt/pcd_ds/
+[RatioMap] [.npy] Location: data/usegeo_1/fusion/test/ratiomap/
+[MGEP]     [.npy] Location: data/usegeo_1/fusion/test/metric_ground/
+[MDEPTH]   [.npy] Location: data/usegeo_1/proection/test/metric_depth/
+agl float DONE
+ratiomap hw1 DONE data/usegeo_1/fusion/test/ground/2021-04-23_13-17-12_S2223314_DxO.pcd
+mbg hw1 DONE
+
+```
+
 
 Flags with help
 ```bash

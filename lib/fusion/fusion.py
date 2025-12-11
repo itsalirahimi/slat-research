@@ -71,16 +71,17 @@ class BGPatternFuser(O3DGUI):
         _pcd = pcm2pcd(fused_pcm_nwu, cimg)
         _pcd_gep = pcdArr2pcd(gep)
         _gep_norm = pcd2hw1(_pcd_gep, H, W)
+        _mfused = pcd2hw1(_pcd, H, W)
 
         # ======== Write to disk ========
         _filename_fuse = os.path.join(self.config.fusion_dir, f"{filename}.pcd")
         _filename_gep = os.path.join(self.config.gep_dir, f"{filename}.pcd")
-        _filename_rm = os.path.join(self.config.rm_dir, f"{filename}.npy")
+        _filename_mfused = os.path.join(self.config.mfused_dir, f"{filename}.npy")
         _filename_mgep = os.path.join(self.config.mgep_dir, f"{filename}.npy")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_fuse)
             save_pcd(np.asarray(_pcd_gep.points), np.asarray(_pcd.colors), filepath=_filename_gep)
-            np.save(_filename_rm, ratio_map)
+            np.save(_filename_mfused, _mfused)
             np.save(_filename_mgep, _gep_norm)
 
             print(f"Wrote pcd file on {_filename_fuse}")

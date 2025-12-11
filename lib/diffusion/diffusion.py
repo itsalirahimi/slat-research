@@ -167,11 +167,10 @@ class BGPatternDiffuser:
         # np.savetxt(outname2, fine_tunned, delimiter=',')
         # Main data log:
         bg_pc_arr_cam = apply_transform_points(bgpts, T_inv)
-        bg_pts = bg_pc_arr_cam[bgmask]
         colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
         colors[:,0] = 1
         mask = mask2image(bgmask, H, W)
-        _bg_pcd = pcdArr2pcd(bg_pts, colors)
+        _bg_pcd = pcdArr2pcd(bg_pc_arr_cam, colors)
         _bg_norm = pcd2hw1(_bg_pcd, H, W)
         # ======== Write to disk ========
         _filename_diffusion = os.path.join(self.config.diffusion_dir, f"{name}.pcd")

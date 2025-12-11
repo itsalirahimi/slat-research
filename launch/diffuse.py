@@ -13,6 +13,7 @@ def main():
         hfov_deg = io.cfg["hfov_deg"],
         root_dir=io.getDataRootDir(),
         dst_dir=io.getDstDir(),
+        do_save=io.getDoSave(),
     )
     diffuser = BGPatternDiffuser(cfg)
     

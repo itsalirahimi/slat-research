@@ -15,8 +15,8 @@ class BGPatternDiffuserConfig:
     coarsetune_grid_w: int = 3
     coarsetune_grid_h: int = 3
     shift_k: float = 1.2
-    finetune_grid_w: int = 8
-    finetune_grid_h: int = 8
+    finetune_grid_w: int = 5
+    finetune_grid_h: int = 5
     tunning_alpha: float = 1e-4
     fast: bool = False
     scoring_downsample_frac: float = 0.1
@@ -32,6 +32,7 @@ class BGPatternDiffuserConfig:
     tunning_varThresh: float = 100
     tunning_window: int = 10
     ct1iters: int = 200
+    do_save: bool = None
 
     def __post_init__(self):
         self.diffusion_dir = os.path.join(self.root_dir, "diffusion", self.dst_dir, "background")

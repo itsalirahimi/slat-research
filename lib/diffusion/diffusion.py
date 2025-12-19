@@ -145,7 +145,7 @@ class BGPatternDiffuser:
         #                                 self.config.spline_mesh_samples_v, 1.0)
         
         fil, bgmask = filter_mesh_neighbors(rd_pcd_arr, fine_tunned, self.config.spline_mesh_samples_u,
-                                            self.config.spline_mesh_samples_v, 0.5, 1.2)
+                                            self.config.spline_mesh_samples_v, 0.2, 1.2)
         fil_pcd = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(fil))
         fil_pcd.paint_uniform_color([1.0, 0, 0])
         if self.config.viz: # Post-fine-tune viz
@@ -171,7 +171,7 @@ class BGPatternDiffuser:
         colors[:,0] = 1
         mask = mask2image(bgmask, H, W)
         _bg_pcd = pcdArr2pcd(bg_pc_arr_cam, colors)
-        _bg_norm = pcd2hw1(_bg_pcd, H, W)
+        _bg_mhw1 = pcd2hw1(_bg_pcd, H, W)
         # ======== Write to disk ========
         _filename_diffusion = os.path.join(self.config.diffusion_dir, f"{name}.pcd")
         _filename_mask = os.path.join(self.config.mask_dir, f"{name}.png")
@@ -179,7 +179,7 @@ class BGPatternDiffuser:
         if self.config.do_save:
             save_pcd(np.asarray(_bg_pcd.points), np.asarray(_bg_pcd.colors), filepath=_filename_diffusion)
             cv2.imwrite(_filename_mask, mask)
-            np.save(_filename_mbg, _bg_norm)
+            np.save(_filename_mbg, _bg_mhw1)
 
 
             print(f"[BGPatternDiffuser] Fine tunning done on index {idx}, data written to {_filename_diffusion}. Time: {(time.time() - t0):.2f} sec")

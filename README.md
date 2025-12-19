@@ -37,13 +37,6 @@ python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
 
 
 
-
-
-
-
-
-
-
 ```
 
 ```bash

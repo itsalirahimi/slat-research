@@ -5,7 +5,7 @@ from .helper import *
 from utils.o3dviz import mat_mesh, fit_camera
 from .config import *
 from ioHandle.IOHandler import save_pcd
-from utils.conversion import pcm2pcd
+from utils.conversion import pcm2pcd, pcd2hw1
 
 class Mapper3D(O3DGUI):
     def __init__(self, config: Mapper3DConfig):
@@ -44,7 +44,7 @@ class Mapper3D(O3DGUI):
 
         _pcd = pcm2pcd(projected_pc, cimg_ds)
         _pcd_c = pcm2pcd(projected_pc_can, cimg_ds)
-
+        _depthcan_mhw1 = pcd2hw1(_pcd_c, H_ds, W_ds)
         # ======== Write to disk ========
         _filename_radial = os.path.join(self.config.radial_dir, f"{filename}.pcd")
         _filename_canonical = os.path.join(self.config.canonical_dir, f"{filename}.pcd")
@@ -54,7 +54,7 @@ class Mapper3D(O3DGUI):
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_radial)
             save_pcd(np.asarray(_pcd_c.points), np.asarray(_pcd_c.colors), filepath=_filename_canonical)
             cv2.imwrite(_filename_imgds, cimg_ds)
-            np.save(_filename_mdepthds, metric_depth_ds)
+            np.save(_filename_mdepthds, _depthcan_mhw1)
 
             print(f"Wrote pcd file on {_filename_radial}")
 

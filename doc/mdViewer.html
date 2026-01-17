@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mermaid Diagram Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body, html {
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        .container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            gap: 10px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            backdrop-filter: blur(10px);
+            flex-shrink: 0;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+
+        .file-input-wrapper input[type="file"] {
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+            width: 100%;
+            height: 100%;
+        }
+
+        .btn {
+            background: #4f46e5;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+        }
+
+        .btn:hover {
+            background: #4338ca;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: #4f46e5;
+            border: 2px solid #4f46e5;
+        }
+
+        .btn-outline:hover {
+            background: #4f46e5;
+            color: white;
+        }
+
+        .zoom-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: rgba(79, 70, 229, 0.1);
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+
+        .zoom-controls button {
+            background: white;
+            border: 2px solid #4f46e5;
+            color: #4f46e5;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .zoom-controls button:hover {
+            background: #4f46e5;
+            color: white;
+        }
+
+        .zoom-level {
+            font-weight: 600;
+            color: #4f46e5;
+            min-width: 50px;
+            text-align: center;
+            font-size: 14px;
+        }
+
+        .viewer-container {
+            flex: 1;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        #mermaid-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+            cursor: grab;
+            background: #f8fafc;
+        }
+
+        #mermaid-container:active {
+            cursor: grabbing;
+        }
+
+        .diagram-wrapper {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform-origin: 0 0;
+            transition: transform 0.1s ease-out;
+        }
+
+        .no-file {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #64748b;
+            padding: 20px;
+        }
+
+        .file-info {
+            margin-top: 10px;
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            word-break: break-all;
+            padding: 0 10px;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #4f46e5;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #eef2ff;
+            border-top: 3px solid #4f46e5;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            text-align: center;
+            max-width: 80%;
+            max-height: 80%;
+            overflow: auto;
+        }
+
+        .error-title {
+            color: #dc2626;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .error-content {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-word;
+            text-align: left;
+            margin: 15px 0;
+            max-height: 300px;
+            overflow: auto;
+        }
+
+        .clear-btn {
+            background: #dc2626;
+        }
+
+        .clear-btn:hover {
+            background: #b91c1c;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .btn {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .zoom-controls {
+                justify-content: center;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Mermaid Viewer</h1>
+            
+            <div class="controls">
+                <div class="file-input-wrapper">
+                    <button class="btn" id="select-btn">
+                        📁 Select Mermaid File
+                    </button>
+                    <input type="file" id="file-input" accept=".mmd,.mermaid,.txt,.md" multiple>
+                </div>
+                
+                <button class="btn btn-outline" id="reset-view">
+                    🔄 Reset View
+                </button>
+                
+                <button class="btn clear-btn" id="clear-view">
+                    🗑️ Clear
+                </button>
+                
+                <div class="zoom-controls">
+                    <button id="zoom-out">-</button>
+                    <span id="zoom-level" class="zoom-level">100%</span>
+                    <button id="zoom-in">+</button>
+                </div>
+            </div>
+            
+            <div class="file-info">
+                <span id="current-file">No file selected</span>
+            </div>
+        </div>
+        
+        <div class="viewer-container">
+            <div id="mermaid-container">
+                <div class="no-file" id="no-file-message">
+                    <div style="font-size: 48px; margin-bottom: 20px;">📊</div>
+                    <p style="font-size: 18px; margin-bottom: 10px;">Select a Mermaid file to begin</p>
+                    <p style="font-size: 14px; color: #94a3b8;">Supported formats: .mmd, .mermaid, .txt, .md</p>
+                    <p style="font-size: 12px; margin-top: 20px; color: #94a3b8;">Drag and drop files here</p>
+                </div>
+                
+                <div class="loading" id="loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Rendering diagram...</p>
+                </div>
+                
+                <div id="diagram-wrapper" class="diagram-wrapper"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Latest Mermaid version from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+
+    <script>
+        // Initialize variables
+        let scale = 1;
+        let position = { x: 0, y: 0 };
+        let isDragging = false;
+        let startPos = { x: 0, y: 0 };
+        let currentFileName = '';
+        
+        // DOM Elements
+        const fileInput = document.getElementById('file-input');
+        const selectBtn = document.getElementById('select-btn');
+        const mermaidContainer = document.getElementById('mermaid-container');
+        const diagramWrapper = document.getElementById('diagram-wrapper');
+        const zoomLevel = document.getElementById('zoom-level');
+        const currentFile = document.getElementById('current-file');
+        const noFileMessage = document.getElementById('no-file-message');
+        const loading = document.getElementById('loading');
+        const resetViewBtn = document.getElementById('reset-view');
+        const clearViewBtn = document.getElementById('clear-view');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        
+        // Initialize Mermaid with latest version
+        function initializeMermaid() {
+            try {
+                mermaid.initialize({
+                    startOnLoad: false,
+                    theme: 'default',
+                    flowchart: {
+                        useMaxWidth: false,
+                        htmlLabels: true,
+                        curve: 'basis'
+                    },
+                    securityLevel: 'loose',
+                    maxTextSize: 1000000
+                });
+                console.log('Mermaid initialized successfully');
+            } catch (error) {
+                console.error('Failed to initialize Mermaid:', error);
+                showError('Failed to initialize Mermaid. Please check console for details.');
+            }
+        }
+        
+        // Show error message
+        function showError(message, content = '') {
+            diagramWrapper.innerHTML = `
+                <div class="error-message">
+                    <div class="error-title">⚠️ Error</div>
+                    <div style="margin-bottom: 15px; color: #666;">${message}</div>
+                    ${content ? `<div class="error-content">${content}</div>` : ''}
+                </div>
+            `;
+        }
+        
+        // Update the view transform
+        function updateTransform() {
+            diagramWrapper.style.transform = `translate(${position.x}px, ${position.y}px) scale(${scale})`;
+            zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+        }
+        
+        // Reset view to initial state
+        function resetView() {
+            scale = 1;
+            position = { x: 0, y: 0 };
+            updateTransform();
+        }
+        
+        // Clear the view
+        function clearView() {
+            diagramWrapper.innerHTML = '';
+            noFileMessage.style.display = 'block';
+            currentFileName = '';
+            currentFile.textContent = 'No file selected';
+            resetView();
+        }
+        
+        // Zoom in/out
+        function zoom(delta) {
+            const zoomIntensity = 0.1;
+            const newScale = scale * (1 + delta * zoomIntensity);
+            
+            if (newScale >= 0.1 && newScale <= 5) {
+                scale = newScale;
+                updateTransform();
+            }
+        }
+        
+        // Fix common Mermaid syntax issues
+        function fixMermaidSyntax(content) {
+            let fixed = content;
+            
+            // Remove code block markers
+            fixed = fixed.replace(/```mermaid/g, '').replace(/```/g, '');
+            
+            // Fix single quotes in HTML attributes (common issue)
+            fixed = fixed.replace(/style='([^']*)'/g, function(match, p1) {
+                return 'style="' + p1 + '"';
+            });
+            
+            // Fix class attributes
+            fixed = fixed.replace(/class='([^']*)'/g, function(match, p1) {
+                return 'class="' + p1 + '"';
+            });
+            
+            // Fix other attributes
+            fixed = fixed.replace(/width='([^']*)'/g, function(match, p1) {
+                return 'width="' + p1 + '"';
+            });
+            
+            // Ensure proper line endings
+            fixed = fixed.trim();
+            
+            // Add flowchart declaration if missing
+            if (!fixed.startsWith('flowchart') && !fixed.startsWith('graph')) {
+                fixed = 'flowchart TD\n' + fixed;
+            }
+            
+            return fixed;
+        }
+        
+        // Load and render Mermaid file
+        function loadMermaidFile(content, fileName) {
+            // Hide no file message and show loading
+            noFileMessage.style.display = 'none';
+            loading.style.display = 'block';
+            diagramWrapper.innerHTML = '';
+            
+            // Update current file info
+            currentFileName = fileName;
+            currentFile.textContent = fileName;
+            currentFile.title = fileName;
+            
+            // Fix syntax issues
+            const mermaidContent = fixMermaidSyntax(content);
+            
+            // Create a container for the diagram
+            const containerId = 'mermaid-diagram-' + Date.now();
+            diagramWrapper.innerHTML = `<div id="${containerId}" class="mermaid"></div>`;
+            
+            // Get the mermaid element
+            const mermaidElement = document.getElementById(containerId);
+            
+            // Set the content
+            mermaidElement.textContent = mermaidContent;
+            
+            // Try to render with Mermaid
+            try {
+                mermaid.run({
+                    nodes: [mermaidElement]
+                }).then(() => {
+                    // Hide loading
+                    loading.style.display = 'none';
+                    
+                    // Reset view to center
+                    setTimeout(() => {
+                        resetView();
+                        
+                        // Center the diagram
+                        const svg = diagramWrapper.querySelector('svg');
+                        if (svg) {
+                            const svgWidth = svg.getBoundingClientRect().width;
+                            const svgHeight = svg.getBoundingClientRect().height;
+                            const containerWidth = mermaidContainer.clientWidth;
+                            const containerHeight = mermaidContainer.clientHeight;
+                            
+                            position.x = (containerWidth / 2) - (svgWidth / 2);
+                            position.y = (containerHeight / 2) - (svgHeight / 2);
+                            updateTransform();
+                        }
+                    }, 100);
+                }).catch(error => {
+                    loading.style.display = 'none';
+                    showError('Failed to render diagram', error.message + '\n\nFixed Content:\n' + mermaidContent);
+                });
+            } catch (error) {
+                loading.style.display = 'none';
+                showError('Failed to render diagram', error.message + '\n\nFixed Content:\n' + mermaidContent);
+            }
+        }
+        
+        // Handle file selection via button click
+        selectBtn.addEventListener('click', () => {
+            fileInput.click();
+        });
+        
+        // Handle file input change
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                loadMermaidFile(event.target.result, file.name);
+            };
+            reader.onerror = () => {
+                showError('Failed to read file');
+            };
+            reader.readAsText(file);
+            
+            // Reset file input
+            e.target.value = '';
+        });
+        
+        // Drag and drop support
+        mermaidContainer.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            mermaidContainer.style.backgroundColor = 'rgba(79, 70, 229, 0.1)';
+        });
+        
+        mermaidContainer.addEventListener('dragleave', () => {
+            mermaidContainer.style.backgroundColor = '';
+        });
+        
+        mermaidContainer.addEventListener('drop', (e) => {
+            e.preventDefault();
+            mermaidContainer.style.backgroundColor = '';
+            
+            const file = e.dataTransfer.files[0];
+            if (!file) return;
+            
+            const validExtensions = ['.mmd', '.mermaid', '.txt', '.md'];
+            const fileExt = '.' + file.name.split('.').pop().toLowerCase();
+            
+            if (!validExtensions.includes(fileExt)) {
+                alert('Please select a valid Mermaid file (.mmd, .mermaid, .txt, .md)');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                loadMermaidFile(event.target.result, file.name);
+            };
+            reader.onerror = () => {
+                showError('Failed to read file');
+            };
+            reader.readAsText(file);
+        });
+        
+        // Pan functionality
+        mermaidContainer.addEventListener('mousedown', (e) => {
+            if (e.target.closest('button') || e.target.closest('a')) return;
+            
+            isDragging = true;
+            startPos = {
+                x: e.clientX - position.x,
+                y: e.clientY - position.y
+            };
+            mermaidContainer.style.cursor = 'grabbing';
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            position.x = e.clientX - startPos.x;
+            position.y = e.clientY - startPos.y;
+            updateTransform();
+        });
+        
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            mermaidContainer.style.cursor = 'grab';
+        });
+        
+        // Zoom with mouse wheel
+        mermaidContainer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? -1 : 1;
+            zoom(delta);
+        });
+        
+        // Button event listeners
+        zoomInBtn.addEventListener('click', () => zoom(1));
+        zoomOutBtn.addEventListener('click', () => zoom(-1));
+        resetViewBtn.addEventListener('click', resetView);
+        clearViewBtn.addEventListener('click', clearView);
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Zoom with Ctrl + Plus/Minus
+            if (e.ctrlKey || e.metaKey) {
+                if (e.key === '+' || e.key === '=') {
+                    e.preventDefault();
+                    zoom(1);
+                } else if (e.key === '-' || e.key === '_') {
+                    e.preventDefault();
+                    zoom(-1);
+                } else if (e.key === '0') {
+                    e.preventDefault();
+                    resetView();
+                }
+            }
+            
+            // Reset with R key
+            if (e.key === 'r' || e.key === 'R') {
+                if (!e.ctrlKey && !e.metaKey) {
+                    resetView();
+                }
+            }
+            
+            // Clear with Escape key
+            if (e.key === 'Escape') {
+                clearView();
+            }
+        });
+        
+        // Touch events for mobile
+        let touchStartDistance = 0;
+        let touchStartScale = 1;
+        
+        mermaidContainer.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                // Two-finger touch for zoom
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                touchStartDistance = Math.sqrt(dx * dx + dy * dy);
+                touchStartScale = scale;
+            } else if (e.touches.length === 1) {
+                // One-finger touch for pan
+                isDragging = true;
+                startPos = {
+                    x: e.touches[0].clientX - position.x,
+                    y: e.touches[0].clientY - position.y
+                };
+            }
+        });
+        
+        mermaidContainer.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (e.touches.length === 2) {
+                // Two-finger pinch zoom
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                const newScale = touchStartScale * (distance / touchStartDistance);
+                
+                // Limit zoom scale
+                if (newScale >= 0.1 && newScale <= 5) {
+                    scale = newScale;
+                    updateTransform();
+                }
+            } else if (e.touches.length === 1 && isDragging) {
+                // One-finger pan
+                position.x = e.touches[0].clientX - startPos.x;
+                position.y = e.touches[0].clientY - startPos.y;
+                updateTransform();
+            }
+        });
+        
+        mermaidContainer.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+        
+        // Initialize Mermaid on load
+        window.addEventListener('DOMContentLoaded', () => {
+            initializeMermaid();
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            // Re-center the diagram on resize
+            setTimeout(resetView, 100);
+        });
+    </script>
+</body>
+</html>

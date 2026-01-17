@@ -121,17 +121,12 @@ class IOHandler:
             pose = Pose(p6, rot_format=rot_format)
 
         elif rot_format == RotFormat.W2C_ROT:
-            extmat_path = os.path.join(self.dataset_dir, "data", "pose")
-            extmat_path = os.path.join(extmat_path, row["name"] + ".json")
-            with open(extmat_path, "r") as f:
-                extmat_d = json.load(f)
-            # extmat_data = np.loadtxt(extmat_path, delimiter=',', dtype=np.float32)
-            extmat_r = extmat_d["rotation"]#.reshape(4, 4)
-            extmat_t = np.array(extmat_d["translation"])#.reshape(4, 4)
-            extmat_data = np.hstack([extmat_r, extmat_t.reshape(3,1)])
-            extmat_data = np.vstack([extmat_data, np.array([0,0,0,1]).reshape(1,4)])
-            extmat = ExtMat(data=extmat_data)
-            pose = Pose(extmat, rot_format=rot_format)
+            rotation = np.asarray(row["rotation"]) # shape(3, 3)
+            extmat = ExtMat(x=row["pose_utm"][0], 
+                            y=row["pose_utm"][1], 
+                            z=row["agl"], 
+                            rotation=rotation)
+            pose = Pose(extmat, rot_format=RotFormat.W2C_ROT)
 
         elif rot_format == RotFormat.OPK:
             # opk = OPK(x=row["pose_utm"][0], y=row["pose_utm"][1], z=row["pose_utm"][2], 

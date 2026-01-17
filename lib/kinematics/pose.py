@@ -60,7 +60,10 @@ class Point6:
 
 @dataclass
 class ExtMat:
-    data: NDArray[np.floating]
+    x: float
+    y: float
+    z: float
+    rotation: NDArray[np.floating]
 
 
 @dataclass
@@ -74,8 +77,7 @@ class Pose:
         elif rot_format == RotFormat.OPK:
             self._init_from_opk(data)
         elif rot_format == RotFormat.W2C_ROT:
-            R = data.data if isinstance(data, ExtMat) else data
-            self._init_from_nwu2cam(np.asarray(R, dtype=float))
+            self._init_from_w2c(data)
 
     def _init_from_p6(self, val: Point6) -> None:
         self.p6 = val
@@ -96,17 +98,17 @@ class Pose:
         extmat[:3,  3] = [val.x, val.y, val.z]
         self.extmat = extmat
     
-    def _init_from_nwu2cam(self, extmat: ExtMat) -> None:
-        rot = extmat[:3, :3]
-        t  = extmat[:3, 3]
-        self.p6 = Point6(x=extmat[0, 3], y=extmat[1, 3], z=extmat[2, 3])
-        self.extmat = rot.astype(float)
+    def _init_from_w2c(self, data: ExtMat) -> None:
+        self.p6 = Point6(x=data.x, y=data.y, z=data.z)
+        self.extmat = data.rotation.astype(float)
     
     def _init_from_opk(self, opk: OPK) -> None:
         R3 = rotation_matrix_x(-opk.omega)
         R2 = rotation_matrix_y(-opk.phi)
         R1 = rotation_matrix_z(-opk.kappa)
-        R4 = [[1,0,0],[0,-1,0],[0,0,-1]]
+        R4 = [[1, 0, 0],
+              [0,-1, 0],
+              [0, 0,-1]]
         R = R1 @ R2 @ R3 @ R4
         extmat = np.eye(4, dtype=float)
         extmat[:3, :3] = R

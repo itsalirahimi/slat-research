@@ -11,7 +11,6 @@ def prepare_file_system(base_path: str, name: str) -> Path:
         "eval/gt/in",
         "depth",
         "rgb",
-        "pose",
         "raw",
     ]
     files = [

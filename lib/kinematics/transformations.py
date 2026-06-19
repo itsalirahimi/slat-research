@@ -162,3 +162,21 @@ def apply_transform_mesh(
         TN[nz] /= nrm[nz]
 
     return out
+
+def transform_in_xy_plane(corners: np.ndarray, x: float, y: float, psi: float) -> np.ndarray:
+    """
+    Rotate + translate 3D corner points using aerospace yaw (psi).
+    Convention: clockwise positive, rotation about Z.
+    """
+    if corners.shape != (4, 3):
+        raise ValueError("corners must be of shape (4,3)")
+
+    R_psi = np.array([
+        [ np.cos(psi),  np.sin(psi), 0],
+        [-np.sin(psi),  np.cos(psi), 0],
+        [ 0,            0,           1]
+    ], dtype=float)
+
+    rotated = (R_psi @ corners.T).T
+    translated = rotated + np.array([x, y, 0.0], dtype=float)
+    return translated

@@ -4,7 +4,7 @@ from gui.o3dgui import O3DGUI
 from .helper import *
 from utils.o3dviz import mat_mesh, fit_camera
 from .config import *
-from ioHandle.IOHandler import save_pcd
+from ioHandle.IOHandler import load_pcd, save_pcd
 from utils.conversion import pcm2pcd, pcd2hw1
 
 class Mapper3D(O3DGUI):
@@ -23,9 +23,16 @@ class Mapper3D(O3DGUI):
         ds_ratio = (self.config.downsample_pts / (H*W)) ** 0.5
         W_ds = int(ds_ratio*W)
         H_ds = int(ds_ratio*H)
-        metric_depth_ds = cv2.resize(metric_depth, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
-        cimg_ds = cv2.resize(cimg, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
 
+        if self.config.no_resize:
+            metric_depth_ds = metric_depth
+            cimg_ds = cimg
+            W_ds = W
+            H_ds = H
+        else:
+            metric_depth_ds = cv2.resize(metric_depth, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
+            cimg_ds = cv2.resize(cimg, (W_ds, H_ds), interpolation=cv2.INTER_AREA)
+        
         projected_pc, mc = project3D(metric_depth_ds, pose, self.config.hfov_deg, 
                                     move=self.config.on_video,
                                     pyramidProj=False, 

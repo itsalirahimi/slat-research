@@ -149,6 +149,335 @@ def bspline_surface_mesh_from_ctrl(ctrl_pts_flat: np.ndarray, grid_w: int, grid_
     mesh.compute_vertex_normals()
     return mesh
 
+def _uniform_clamped_knots(n_ctrl: int, p: int) -> np.ndarray:
+    """Open-uniform (clamped) knot vector on [0,1]. Length = n_ctrl + p + 1."""
+    if n_ctrl <= 0:
+        raise ValueError("n_ctrl must be positive")
+    p = int(p)
+    if p < 0:
+        raise ValueError("degree p must be >= 0")
+
+    m = n_ctrl + p
+    U = np.zeros(m + 1, dtype=float)
+    U[m - p:] = 1.0  # last p+1 knots are 1
+
+    num_internal = n_ctrl - p - 1
+    if num_internal > 0:
+        for j in range(1, num_internal + 1):
+            U[p + j] = j / (num_internal + 1)
+    return U
+
+def _find_span(n_ctrl: int, p: int, u: float, U: np.ndarray) -> int:
+    """Find span i such that U[i] <= u < U[i+1], clamped."""
+    if u >= U[n_ctrl]:
+        return n_ctrl - 1
+    if u <= U[p]:
+        return p
+    low, high = p, n_ctrl
+    mid = (low + high) // 2
+    while u < U[mid] or u >= U[mid + 1]:
+        if u < U[mid]:
+            high = mid
+        else:
+            low = mid
+        mid = (low + high) // 2
+    return mid
+
+def _basis_funs(span: int, u: float, p: int, U: np.ndarray) -> np.ndarray:
+    """Cox-de Boor basis N_{span-p..span,p}(u), returns length p+1."""
+    N = np.zeros(p + 1, dtype=float)
+    left = np.zeros(p + 1, dtype=float)
+    right = np.zeros(p + 1, dtype=float)
+
+    N[0] = 1.0
+    for j in range(1, p + 1):
+        left[j] = u - U[span + 1 - j]
+        right[j] = U[span + j] - u
+        saved = 0.0
+        for r in range(0, j):
+            denom = right[r + 1] + left[j - r]
+            temp = 0.0 if denom == 0.0 else (N[r] / denom)
+            N[r] = saved + right[r + 1] * temp
+            saved = left[j - r] * temp
+        N[j] = saved
+    return N
+
+def _build_laplacian(n_u: int, n_v: int) -> np.ndarray:
+    """2D 4-neighborhood Laplacian on (n_v x n_u) grid, acting on vec(control_net)."""
+    M = n_u * n_v
+    L = np.zeros((M, M), dtype=float)
+
+    def idx(i, j):  # i in [0,n_u), j in [0,n_v)
+        return j * n_u + i
+
+    for j in range(n_v):
+        for i in range(n_u):
+            k = idx(i, j)
+            nbrs = []
+            if i > 0:       nbrs.append(idx(i - 1, j))
+            if i < n_u - 1: nbrs.append(idx(i + 1, j))
+            if j > 0:       nbrs.append(idx(i, j - 1))
+            if j < n_v - 1: nbrs.append(idx(i, j + 1))
+            L[k, k] = float(len(nbrs))
+            for nb in nbrs:
+                L[k, nb] = -1.0
+    return L
+
+def _auto_uv_parameterization(pts: np.ndarray) -> np.ndarray:
+    """
+    Map Nx3 points -> Nx2 (u,v) in [0,1]^2.
+    Heuristic:
+      - If one axis is clearly "height" (small extent), use the other two axes.
+      - Else use PCA top-2 components.
+    """
+    eps = 1e-12
+    pts = np.asarray(pts, float)
+    mins = pts.min(axis=0)
+    maxs = pts.max(axis=0)
+    ext = maxs - mins
+
+    order = np.argsort(ext)[::-1]  # largest to smallest
+    a0, a1, a2 = int(order[0]), int(order[1]), int(order[2])
+
+    # "Heightfield-like" heuristic
+    if ext[a2] <= 0.5 * max(eps, min(ext[a0], ext[a1])):
+        uv_raw = pts[:, [a0, a1]]
+    else:
+        mu = pts.mean(axis=0)
+        X = pts - mu
+        C = (X.T @ X) / max(1, len(pts) - 1)
+        w, V = np.linalg.eigh(C)          # ascending
+        basis2 = V[:, -2:]                # 3x2
+        uv_raw = X @ basis2               # Nx2
+
+    mn = uv_raw.min(axis=0)
+    mx = uv_raw.max(axis=0)
+    denom = np.maximum(mx - mn, eps)
+    uv = (uv_raw - mn) / denom
+    return uv
+
+def bspline_surface_mesh_from_ctrl(
+    ctrl_pts_flat: np.ndarray,
+    grid_w: int | None = None,
+    grid_h: int | None = None,
+    su: int = 128,
+    sv: int = 128,
+) -> o3d.geometry.TriangleMesh:
+    """
+    Dual-mode spline surface builder:
+
+    A) GRID MODE (backward-compatible):
+       - Provide grid_w and grid_h.
+       - ctrl_pts_flat must be shape (grid_w*grid_h, 3) ordered row-wise (v-major then u).
+       - Uses your previous tensor-product clamped B-spline evaluation.
+
+    B) SCATTERED MODE (new):
+       - Do NOT provide grid_w/grid_h (leave them None).
+       - ctrl_pts_flat is treated as scattered samples (N,3).
+       - Automatically parameterizes points to (u,v), fits a control net via
+         regularized least squares, then evaluates the same tensor-product B-spline.
+
+    Returns:
+      Open3D TriangleMesh (sv*su vertices).
+    """
+    pts = np.asarray(ctrl_pts_flat, dtype=float)
+    if pts.ndim != 2 or pts.shape[1] != 3:
+        raise ValueError("ctrl_pts_flat must be Nx3")
+
+    # -------------------------
+    # Mode A: grid (old behavior)
+    # -------------------------
+    if grid_w is not None and grid_h is not None:
+        grid_w = int(grid_w)
+        grid_h = int(grid_h)
+        if grid_w <= 0 or grid_h <= 0:
+            raise ValueError("grid_w and grid_h must be positive")
+        if pts.shape[0] != grid_w * grid_h:
+            raise ValueError(
+                f"Grid mode expects N == grid_w*grid_h ({grid_w*grid_h}), got N={pts.shape[0]}"
+            )
+
+        P = pts.reshape(grid_h, grid_w, 3).astype(float)  # [v=j(row), u=i(col)]
+        n_u, n_v = grid_w, grid_h
+
+        p_u = min(3, max(0, n_u - 1))
+        p_v = min(3, max(0, n_v - 1))
+
+        # Degenerate fallback: bilinear upsample using control grid directly
+        if n_u < 2 or n_v < 2:
+            X = P[..., 0]; Y = P[..., 1]; Z = P[..., 2]
+            uu = np.linspace(0, n_u - 1, su)
+            vv = np.linspace(0, n_v - 1, sv)
+            Uidx = np.clip(np.searchsorted(np.arange(n_u), uu) - 1, 0, max(0, n_u - 2))
+            Vidx = np.clip(np.searchsorted(np.arange(n_v), vv) - 1, 0, max(0, n_v - 2))
+            XX = np.zeros((sv, su)); YY = np.zeros((sv, su)); ZZ = np.zeros((sv, su))
+
+            for a, j in enumerate(Vidx):
+                v0 = j; v1 = min(j + 1, n_v - 1)
+                tv = (vv[a] - v0) if n_v > 1 else 0.0
+                for b, i in enumerate(Uidx):
+                    u0 = i; u1 = min(i + 1, n_u - 1)
+                    tu = (uu[b] - u0) if n_u > 1 else 0.0
+
+                    def bl(M):
+                        return ((1 - tu) * (1 - tv) * M[v0, u0] +
+                                tu * (1 - tv) * M[v0, u1] +
+                                (1 - tu) * tv * M[v1, u0] +
+                                tu * tv * M[v1, u1])
+
+                    XX[a, b] = bl(X); YY[a, b] = bl(Y); ZZ[a, b] = bl(Z)
+
+            verts = np.stack([XX.ravel(), YY.ravel(), ZZ.ravel()], axis=1)
+
+        else:
+            U = _uniform_clamped_knots(n_u, p_u)
+            V = _uniform_clamped_knots(n_v, p_v)
+
+            us = np.linspace(0.0, 1.0, su)
+            vs = np.linspace(0.0, 1.0, sv)
+
+            Bu = np.zeros((su, n_u))
+            Bv = np.zeros((sv, n_v))
+
+            for b, u in enumerate(us):
+                span_u = _find_span(n_u, p_u, float(u), U)
+                Nu = _basis_funs(span_u, float(u), p_u, U)
+                Bu[b, span_u - p_u: span_u + 1] = Nu
+
+            for a, v in enumerate(vs):
+                span_v = _find_span(n_v, p_v, float(v), V)
+                Nv = _basis_funs(span_v, float(v), p_v, V)
+                Bv[a, span_v - p_v: span_v + 1] = Nv
+
+            Xc, Yc, Zc = P[..., 0], P[..., 1], P[..., 2]
+            XX = Bv @ Xc @ Bu.T
+            YY = Bv @ Yc @ Bu.T
+            ZZ = Bv @ Zc @ Bu.T
+            verts = np.stack([XX.ravel(), YY.ravel(), ZZ.ravel()], axis=1)
+
+    # -------------------------
+    # Mode B: scattered (new behavior)
+    # -------------------------
+    else:
+        # Defaults chosen to be robust across scenes; tweak inside if you want.
+        degree = 3
+        lambda_smooth = 1e-3
+
+        N = pts.shape[0]
+        if N < 4:
+            raise ValueError("Scattered mode needs at least 4 points to fit a surface")
+
+        uv = _auto_uv_parameterization(pts)
+        u = uv[:, 0].clip(0.0, 1.0)
+        v = uv[:, 1].clip(0.0, 1.0)
+
+        # Choose control net size automatically (no extra args; purely from N)
+        k = int(np.clip(np.sqrt(N) / 2.0, 4, 24))  # overall density
+        # Keep it roughly square to avoid pathological parameterizations
+        n_u = int(np.clip(k, 4, 40))
+        n_v = int(np.clip(k, 4, 40))
+
+        # Avoid gross over-parameterization
+        while n_u * n_v > max(16, N // 2) and (n_u > 4 or n_v > 4):
+            if n_u >= n_v and n_u > 4:
+                n_u -= 1
+            elif n_v > 4:
+                n_v -= 1
+            else:
+                break
+
+        p_u = min(int(degree), n_u - 1)
+        p_v = min(int(degree), n_v - 1)
+        if n_u < 2 or n_v < 2:
+            raise ValueError("Internal error: need at least 2 control points per axis")
+
+        U = _uniform_clamped_knots(n_u, p_u)
+        V = _uniform_clamped_knots(n_v, p_v)
+
+        M = n_u * n_v
+        A = np.zeros((N, M), dtype=float)
+
+        Bu_i = np.zeros(n_u, dtype=float)
+        Bv_i = np.zeros(n_v, dtype=float)
+
+        for r in range(N):
+            Bu_i.fill(0.0)
+            Bv_i.fill(0.0)
+
+            su_span = _find_span(n_u, p_u, float(u[r]), U)
+            Nu = _basis_funs(su_span, float(u[r]), p_u, U)
+            Bu_i[su_span - p_u: su_span + 1] = Nu
+
+            sv_span = _find_span(n_v, p_v, float(v[r]), V)
+            Nv = _basis_funs(sv_span, float(v[r]), p_v, V)
+            Bv_i[sv_span - p_v: sv_span + 1] = Nv
+
+            A[r, :] = np.outer(Bv_i, Bu_i).reshape(-1)  # (j*n_u + i) order
+
+        ATA = A.T @ A
+        ATx = A.T @ pts[:, 0]
+        ATy = A.T @ pts[:, 1]
+        ATz = A.T @ pts[:, 2]
+
+        if lambda_smooth > 0.0:
+            L = _build_laplacian(n_u, n_v)
+            ATA = ATA + (L.T @ L) * float(lambda_smooth)
+
+        try:
+            cx = np.linalg.solve(ATA, ATx)
+            cy = np.linalg.solve(ATA, ATy)
+            cz = np.linalg.solve(ATA, ATz)
+        except np.linalg.LinAlgError:
+            cx, *_ = np.linalg.lstsq(ATA, ATx, rcond=None)
+            cy, *_ = np.linalg.lstsq(ATA, ATy, rcond=None)
+            cz, *_ = np.linalg.lstsq(ATA, ATz, rcond=None)
+
+        Cx = cx.reshape(n_v, n_u)
+        Cy = cy.reshape(n_v, n_u)
+        Cz = cz.reshape(n_v, n_u)
+
+        # Evaluate on (sv x su) using the same tensor-product logic
+        us = np.linspace(0.0, 1.0, su)
+        vs = np.linspace(0.0, 1.0, sv)
+
+        Bu = np.zeros((su, n_u), dtype=float)
+        Bv = np.zeros((sv, n_v), dtype=float)
+
+        for b, uu in enumerate(us):
+            span_u = _find_span(n_u, p_u, float(uu), U)
+            Nu = _basis_funs(span_u, float(uu), p_u, U)
+            Bu[b, span_u - p_u: span_u + 1] = Nu
+
+        for a, vv in enumerate(vs):
+            span_v = _find_span(n_v, p_v, float(vv), V)
+            Nv = _basis_funs(span_v, float(vv), p_v, V)
+            Bv[a, span_v - p_v: span_v + 1] = Nv
+
+        XX = Bv @ Cx @ Bu.T
+        YY = Bv @ Cy @ Bu.T
+        ZZ = Bv @ Cz @ Bu.T
+        verts = np.stack([XX.ravel(), YY.ravel(), ZZ.ravel()], axis=1)
+
+    # -------------------------
+    # Connectivity (unchanged)
+    # -------------------------
+    tris = []
+    for j in range(sv - 1):
+        for i in range(su - 1):
+            v0 = j * su + i
+            v1 = v0 + 1
+            v2 = v0 + su
+            v3 = v2 + 1
+            tris.append([v0, v2, v1])
+            tris.append([v1, v2, v3])
+
+    mesh = o3d.geometry.TriangleMesh(
+        vertices=o3d.utility.Vector3dVector(np.asarray(verts, np.float64)),
+        triangles=o3d.utility.Vector3iVector(np.asarray(tris, np.int32)),
+    )
+    mesh.compute_vertex_normals()
+    return mesh
+
 def _uniform_clamped_knots(n: int, p: int):
     # n = number of control points; p = degree
     m = n + p + 1

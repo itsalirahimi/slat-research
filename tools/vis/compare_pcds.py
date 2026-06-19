@@ -91,9 +91,9 @@ def main():
     ap.add_argument("items", nargs="*", help="Sequence: file1 [color1] file2 [color2] ...")
     ap.add_argument("--voxel", type=float, default=0.0, help="Voxel downsample size (0 to disable).")
     ap.add_argument("--point-size", type=float, default=1.0, help="Point size in viewer.")
-    ap.add_argument("--bg", default="0,0,0",
+    ap.add_argument("--bg", default="1,1,1",
                     help="Background color (name, #hex, or 'R,G,B'). Default: 0,0,0.")
-    ap.add_argument("--frame", type=float, default=1.0,
+    ap.add_argument("--frame", type=float, default=10.0,
                     help="Add a coordinate frame of this size (0 disables).")
     ap.add_argument("--center", action="store_true",
                     help="Center each cloud at origin (subtract centroid).")

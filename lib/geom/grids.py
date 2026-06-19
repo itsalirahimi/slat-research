@@ -34,3 +34,15 @@ def reorder_ctrl_points_rowmajor(ctrl_pts: np.ndarray) -> np.ndarray:
     xs, ys = ctrl_pts[:, 0], ctrl_pts[:, 1]
     order = np.lexsort((xs, ys))  # primary: y, secondary: x
     return ctrl_pts[order]
+
+def extract_pcm_corners(points_3d: np.ndarray) -> np.ndarray:
+    """HxWx3 -> 4 corners in order: TL, TR, BR, BL"""
+    if points_3d.ndim != 3 or points_3d.shape[2] != 3:
+        raise ValueError("Input must be an HxWx3 numpy array")
+    H, W, _ = points_3d.shape
+    return np.array([
+        points_3d[0, 0],          # TL
+        points_3d[0, W - 1],      # TR
+        points_3d[H - 1, W - 1],  # BR
+        points_3d[H - 1, 0],      # BL
+    ], dtype=float)

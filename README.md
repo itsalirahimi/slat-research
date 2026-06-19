@@ -1,7 +1,46 @@
 ## Major Job
+
+
+
+
+python3 lib/postproc/base.py --name dtm
+python3 launch/project.py --src data/dtm/depth/depthpro/ --dst depthpro --save
+python3 launch/project.py --src data/dtm/depth/zoedepth/ --dst zoedepth --save
+python3 launch/project.py --src data/dtm/depth/marigold/ --dst marigold --save
+python3 launch/project.py --src data/dtm/depth/da2/ --dst da2 --save
+python3 launch/project.py --src data/dtm/depth/da3/ --dst da3 --save
+
+
+
+python3 launch/diffuse.py --src data/dtm/projection/depthpro/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/zoedepth/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/marigold/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/da2/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/da3/canonical/ --save
+
+
+
+
+python3 o3d.py --proj /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/proj.pcd --bg /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/bg.pcd --save-npy /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/o3d.npy --width 6000
+
+
+```bash
+python3 launch/project.py --src data/bvc/depth/depth_pro/ --dst test --save --start 50
+python3 launch/diffuse.py --src data/bvc/projection/test/canonical/ --save --start 50
+```
+
+### ORTHOLOC
 ```bash
 # projection
 
+
+python3 lib/postproc/ortholoc1.py --raw data/ort/raw/ --out data/ort/
+python3 lib/postproc/ortholoc2.py --src data/ort/eval/gt/npz_ds/
+
+
+```
+### USEGEO
+```bash
 # -------------Step 1 - Post Process
 # first run: to create base folders in data/usegeo_1
 python3 lib/postproc/base.py --name usegeo_1
@@ -12,6 +51,7 @@ python3 lib/postproc/base.py --name usegeo_1
 
 # This launch file create what we need from raw data of usegeo
 python3 lib/postproc/usegeo_1.py --raw data/usegeo_1/raw/ --out data/usegeo_1/
+
 # Project LiDAR (write eval/gt/pcd_ds)
 python3 lib/postproc/usegeo_2.py --src data/usegeo_1/eval/gt/npz_ds/
 
@@ -35,20 +75,6 @@ python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
 
 # -------------Step 7 - evaluation
 
-
-
-```
-
-```bash
-# OUTPUTS
-[RGB]      [.png] Location: data/usegeo_1/eval/gt/rgb/
-[GT]       [.pcd] Location: data/usegeo_1/eval/gt/pcd_ds/
-[RatioMap] [.npy] Location: data/usegeo_1/fusion/test/ratiomap/
-[MGEP]     [.npy] Location: data/usegeo_1/fusion/test/metric_ground/
-[MDEPTH]   [.npy] Location: data/usegeo_1/proection/test/metric_depth/
-agl float DONE
-ratiomap hw1 DONE data/usegeo_1/fusion/test/ground/2021-04-23_13-17-12_S2223314_DxO.pcd
-mbg hw1 DONE
 
 ```
 

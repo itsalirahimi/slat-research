@@ -24,6 +24,7 @@ class Mapper3DConfig:
     do_save: bool = None
     on_video: bool = False
     downsample_pts: int = 100000
+    no_resize: bool = True
 
     def __post_init__(self):
         self.radial_dir = os.path.join(self.root_dir, "projection", self.dst_dir, "radial")

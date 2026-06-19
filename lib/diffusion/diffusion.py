@@ -161,7 +161,10 @@ class BGPatternDiffuser:
         T_inv[:3, :3] = R.T
         T_inv[:3, 3]  = -R.T @ t
         bgpts = project_external_along_normals_noreject(rd_pcd_arr, fmesh)
-        # Debug data log:
+        # outname = "bgpts.pcd"
+        # outname1 = "rd_pcd.pcd"
+        # outname2 = "fine_tunned.pcd"
+        # # Debug data log:
         # save_pcd(bgpts, np.zeros_like(np.asarray(rd_pcd.colors)), outname)
         # save_pcd(np.asarray(rd_pcd.points), np.asarray(rd_pcd_cam.colors), outname1)
         # np.savetxt(outname2, fine_tunned, delimiter=',')

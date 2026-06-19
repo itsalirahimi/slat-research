@@ -14,19 +14,29 @@ class EvalIO(IOHandler):
         
         idx = row['index']
         name = row["name"]
-        # pose = self.get_pose(row)
-        raw_dir = os.path.join(self.dataset_dir, "projection", self.dst, "canonical")
-        raw = load_pcd(os.path.join(raw_dir, f"{name}.pcd"))
-        fused_dir = os.path.join(self.dataset_dir, "fusion", self.dst, "canonical")
-        fused = load_pcd(os.path.join(fused_dir, f"{name}.pcd"))
-        gt_dir = os.path.join(self.dataset_dir, "eval", "gt", "pcd_ds")
-        groundtruth = load_pcd(os.path.join(gt_dir, f"{name}.pcd"))
+        pose = self.get_pose(row)
+
+        img_dir = os.path.join(self.dataset_dir, "projection", self.dst, "rgb")
+        color_img = self.get_color_image(img_dir , name, self.cfg["rgb_extension"])
+
+        bg_can_dir = os.path.join(self.dataset_dir, "diffusion", self.dst, "canonical", "background")
+        bg_can = load_pcd(os.path.join(bg_can_dir, f"{name}.pcd"))
+
+        # raw_dir = os.path.join(self.dataset_dir, "projection", self.dst, "canonical")
+        # raw = load_pcd(os.path.join(raw_dir, f"{name}.pcd"))
+        # fused_dir = os.path.join(self.dataset_dir, "fusion", self.dst, "canonical")
+        # fused = load_pcd(os.path.join(fused_dir, f"{name}.pcd"))
+        # gt_dir = os.path.join(self.dataset_dir, "eval", "gt", "pcd_ds")
+        # groundtruth = load_pcd(os.path.join(gt_dir, f"{name}.pcd"))
 
         dic = {
             "idx": idx,
             "name": name,
-            "raw": raw,
-            "fused": fused,
-            "groundtruth": groundtruth,
+            "pose": pose, 
+            # "raw": raw,
+            # "fused": fused,
+            # "groundtruth": groundtruth,
+            "image": color_img,
+            "bg_can": bg_can,
         }
         return dic

@@ -13,12 +13,12 @@ class VisMode(Enum):
 
 @dataclass
 class EvalConfig:
-    visualize: bool = False
-    cap_corr: int = 200_000
-    metric_voxel_frac: float = 0.0
     hfov_deg: float
     root_dir: str
     dst_dir: str
+    visualize: bool = False
+    cap_corr: int = 200_000
+    metric_voxel_frac: float = 0.0
     visMode: VisMode = VisMode.MSingle
     shape: tuple = None
     color_mode: str = 'constant'  # 'image' | 'proximity' | 'constant' | 'none'

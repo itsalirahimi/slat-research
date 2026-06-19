@@ -151,6 +151,40 @@
             min-height: 0;
         }
 
+        /* container must be relative so header can overlay */
+        .container {
+        position: relative;
+        }
+
+        /* Header becomes an overlay */
+        .header {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        z-index: 50;
+
+        /* smooth show/hide */
+        transition: transform 0.18s ease, opacity 0.18s ease;
+        will-change: transform, opacity;
+        }
+
+        /* Hidden state */
+        .header.is-hidden {
+        transform: translateY(calc(-100% - 20px));
+        opacity: 0;
+        pointer-events: none;
+        }
+
+        /* Viewer fills the whole container area */
+        .viewer-container {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        }
+
         #mermaid-container {
             width: 100%;
             height: 100%;
@@ -333,7 +367,7 @@
     </div>
 
     <!-- Latest Mermaid version from CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+    <script src="mermaid.min.js"></script>
 
     <script>
         // Initialize variables
@@ -356,7 +390,41 @@
         const clearViewBtn = document.getElementById('clear-view');
         const zoomInBtn = document.getElementById('zoom-in');
         const zoomOutBtn = document.getElementById('zoom-out');
-        
+
+        // ===== Header auto-hide logic =====
+        const headerEl = document.querySelector('.header');
+
+        let headerHideTimer = null;
+        let pointerOverHeader = false;
+
+        const REVEAL_PX = 24;          // distance from top edge to reveal
+        const AUTOHIDE_DELAY_MS = 900; // hide delay after showing
+
+        function hasFileLoaded() {
+        return !!currentFileName; // you already update this
+        }
+
+        function setHeaderVisible(visible) {
+        headerEl.classList.toggle('is-hidden', !visible);
+        }
+
+        function cancelHide() {
+        if (headerHideTimer) clearTimeout(headerHideTimer);
+        headerHideTimer = null;
+        }
+
+        function scheduleHide(delayMs = AUTOHIDE_DELAY_MS) {
+        cancelHide();
+        headerHideTimer = setTimeout(() => {
+            if (hasFileLoaded() && !pointerOverHeader) setHeaderVisible(false);
+        }, delayMs);
+        }
+
+        function revealHeaderTemporarily(delayMs = AUTOHIDE_DELAY_MS) {
+        setHeaderVisible(true);
+        if (hasFileLoaded()) scheduleHide(delayMs);
+        }
+                
         // Initialize Mermaid with latest version
         function initializeMermaid() {
             try {
@@ -380,6 +448,8 @@
         
         // Show error message
         function showError(message, content = '') {
+            setHeaderVisible(true);
+            cancelHide();
             diagramWrapper.innerHTML = `
                 <div class="error-message">
                     <div class="error-title">⚠️ Error</div>
@@ -408,20 +478,44 @@
             noFileMessage.style.display = 'block';
             currentFileName = '';
             currentFile.textContent = 'No file selected';
+            setHeaderVisible(true);
+            cancelHide();
             resetView();
         }
         
         // Zoom in/out
-        function zoom(delta) {
+        function zoom(delta, anchorX = null, anchorY = null) {
             const zoomIntensity = 0.1;
-            const newScale = scale * (1 + delta * zoomIntensity);
-            
-            if (newScale >= 0.1 && newScale <= 5) {
-                scale = newScale;
-                updateTransform();
+
+            const oldScale = scale;
+            let newScale = oldScale * (1 + delta * zoomIntensity);
+            newScale = Math.max(0.1, Math.min(5, newScale));
+            if (newScale === oldScale) return;
+
+            // If no anchor given, zoom around container center (nice for buttons/shortcuts)
+            if (anchorX === null || anchorY === null) {
+                anchorX = mermaidContainer.clientWidth * 0.5;
+                anchorY = mermaidContainer.clientHeight * 0.5;
             }
+
+            // Base position of wrapper BEFORE transform (handles top:0 or top:50%)
+            const baseX = diagramWrapper.offsetLeft;
+            const baseY = diagramWrapper.offsetTop;
+
+            // Diagram local coords under the cursor before zoom
+            const px = (anchorX - baseX - position.x) / oldScale;
+            const py = (anchorY - baseY - position.y) / oldScale;
+
+            // Update scale
+            scale = newScale;
+
+            // Update translation so the same local point stays under the cursor
+            position.x = anchorX - baseX - px * newScale;
+            position.y = anchorY - baseY - py * newScale;
+
+            updateTransform();
         }
-        
+
         // Fix common Mermaid syntax issues
         function fixMermaidSyntax(content) {
             let fixed = content;
@@ -487,7 +581,13 @@
                 }).then(() => {
                     // Hide loading
                     loading.style.display = 'none';
-                    
+                    if (hasFileLoaded()) {
+                        // show briefly so user sees it, then hide
+                        revealHeaderTemporarily(700);
+                        scheduleHide(900);
+                    } else {
+                        setHeaderVisible(true);
+                    }
                     // Reset view to center
                     setTimeout(() => {
                         resetView();
@@ -517,6 +617,7 @@
         
         // Handle file selection via button click
         selectBtn.addEventListener('click', () => {
+            clearView();
             fileInput.click();
         });
         
@@ -601,9 +702,14 @@
         // Zoom with mouse wheel
         mermaidContainer.addEventListener('wheel', (e) => {
             e.preventDefault();
+
+            const rect = mermaidContainer.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
             const delta = e.deltaY > 0 ? -1 : 1;
-            zoom(delta);
-        });
+            zoom(delta, x, y);
+        }, { passive: false });
         
         // Button event listeners
         zoomInBtn.addEventListener('click', () => zoom(1));
@@ -699,6 +805,41 @@
             // Re-center the diagram on resize
             setTimeout(resetView, 100);
         });
+
+        // Track hover over header so it doesn't hide while using it
+        headerEl.addEventListener('mouseenter', () => {
+        pointerOverHeader = true;
+        cancelHide();
+        setHeaderVisible(true);
+        });
+        headerEl.addEventListener('mouseleave', () => {
+        pointerOverHeader = false;
+        if (hasFileLoaded()) scheduleHide(400);
+        });
+
+        // Reveal when mouse reaches top edge
+        window.addEventListener('mousemove', (e) => {
+        if (!hasFileLoaded()) {
+            setHeaderVisible(true);
+            return;
+        }
+        if (e.clientY <= REVEAL_PX) {
+            revealHeaderTemporarily(AUTOHIDE_DELAY_MS);
+        }
+        });
+
+        // Reveal on touch near top edge
+        window.addEventListener('touchstart', (e) => {
+        if (!hasFileLoaded()) {
+            setHeaderVisible(true);
+            return;
+        }
+        if (!e.touches || !e.touches.length) return;
+        if (e.touches[0].clientY <= REVEAL_PX * 1.5) {
+            revealHeaderTemporarily(1400);
+        }
+        }, { passive: true });
+
     </script>
 </body>
 </html>

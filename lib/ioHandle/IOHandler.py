@@ -84,7 +84,6 @@ class IOHandler:
     
     def get_color_image(self, dir, name, extention):
         color_path = os.path.join(dir, name + extention)
-        print(color_path)
         return cv2.imread(color_path)
     
     def get_depth(self, target_name, dir):

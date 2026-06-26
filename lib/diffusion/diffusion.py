@@ -5,6 +5,7 @@ import os
 import sys
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/../../lib")
+from diffusion.make_full_pcd import make_full_pcd
 from fusion.helper import compute_center_of_mass
 from geom.surfaces import cg_centeric_xy_spline, bspline_surface_mesh_from_ctrl, \
     project_external_along_normals_noreject
@@ -62,6 +63,16 @@ class BGPatternDiffuser:
     def diffuse(self, data, cimg, name, idx):
         rd_pcd_cam = data
         H, W, _ = cimg.shape
+        print(np.asarray(data.points).shape)
+        rd_pcd_cam = make_full_pcd(
+            data,
+            H=H,
+            W=W,
+            origin="upper",
+            duplicate_strategy="max",
+            interpolation_k=8,
+        )
+        print(np.asarray(rd_pcd_cam.points).shape)
         print(f" =============== [BGPatternDiffuser] Diffusing on index {idx}")
         t0 = time.time()
         rd_pcd, T = orient_point_cloud_cgplane_global(rd_pcd_cam)

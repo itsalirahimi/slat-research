@@ -19,7 +19,7 @@ class DiffuseIO(IOHandler):
         img_dir = os.path.join(self.source_dir, "..", "rgb")
         color_img = self.get_color_image(img_dir , name, self.cfg["rgb_extension"])
         projected = load_pcd(os.path.join(self.source_dir, f"{name}.pcd"))
-                
+         
         dic = {
             "idx": idx,
             "name": name,

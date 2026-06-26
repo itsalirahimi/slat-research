@@ -13,3 +13,5 @@
 *.npy
 data/
 .vscode
+*.pt
+temp/

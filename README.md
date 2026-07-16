@@ -1,22 +1,5 @@
 ## Major Job
 
-python3 lib/postproc/base.py --name dtm
-python3 launch/project.py --src data/dtm/depth/depthpro/ --dst depthpro --save
-python3 launch/project.py --src data/dtm/depth/zoedepth/ --dst zoedepth --save
-python3 launch/project.py --src data/dtm/depth/marigold/ --dst marigold --save
-python3 launch/project.py --src data/dtm/depth/da2/ --dst da2 --save
-python3 launch/project.py --src data/dtm/depth/da3/ --dst da3 --save
-
-python3 launch/diffuse.py --src data/dtm/projection/depthpro/canonical/ --save
-python3 launch/diffuse.py --src data/dtm/projection/zoedepth/canonical/ --save
-python3 launch/diffuse.py --src data/dtm/projection/marigold/canonical/ --save
-python3 launch/diffuse.py --src data/dtm/projection/da2/canonical/ --save
-python3 launch/diffuse.py --src data/dtm/projection/da3/canonical/ --save
-
-
-python3 o3d.py --proj /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/proj.pcd --bg /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/bg.pcd --save-npy /home/ali/dev/A3RIAL/doc/papers/dbvc/figures/FloodNet/6421/o3d.npy --width 6000
-
-
 ```bash
 python3 launch/project.py --src data/bvc/depth/depth_pro/ --dst test --save --start 50
 python3 launch/diffuse.py --src data/bvc/projection/test/canonical/ --save --start 50
@@ -71,6 +54,21 @@ python3 launch/fuse.py --src data/usegeo_1/projection/test/radial/ --save
 
 ```
 
+### Run Diffusion for different MDEs
+```bash
+python3 lib/postproc/base.py --name dtm
+python3 launch/project.py --src data/dtm/depth/depthpro/ --dst depthpro --save DONE
+python3 launch/project.py --src data/dtm/depth/zoedepth/ --dst zoedepth --save DONE
+python3 launch/project.py --src data/dtm/depth/marigold/ --dst marigold --save DONE
+python3 launch/project.py --src data/dtm/depth/da2/ --dst da2 --save DONE
+python3 launch/project.py --src data/dtm/depth/da3/ --dst da3 --save DONE
+
+python3 launch/diffuse.py --src data/dtm/projection/depthpro/canonical/ --save DONE
+python3 launch/diffuse.py --src data/dtm/projection/zoedepth/canonical/ --save DONE
+python3 launch/diffuse.py --src data/dtm/projection/marigold/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/da2/canonical/ --save
+python3 launch/diffuse.py --src data/dtm/projection/da3/canonical/ --save
+```
 
 Flags with help
 ```bash

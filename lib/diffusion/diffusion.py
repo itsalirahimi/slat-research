@@ -63,15 +63,18 @@ class BGPatternDiffuser:
     def diffuse(self, data, cimg, name, idx):
         rd_pcd_cam = data
         H, W, _ = cimg.shape
+        N, _ = np.asarray(data.points).shape
+        print(H, W)
         print(np.asarray(data.points).shape)
-        rd_pcd_cam = make_full_pcd(
-            data,
-            H=H,
-            W=W,
-            origin="upper",
-            duplicate_strategy="max",
-            interpolation_k=8,
-        )
+        if H*W != N:
+            rd_pcd_cam = make_full_pcd(
+                data,
+                H=H,
+                W=W,
+                origin="upper",
+                duplicate_strategy="max",
+                interpolation_k=8,
+            )
         print(np.asarray(rd_pcd_cam.points).shape)
         print(f" =============== [BGPatternDiffuser] Diffusing on index {idx}")
         t0 = time.time()
@@ -181,8 +184,11 @@ class BGPatternDiffuser:
         # np.savetxt(outname2, fine_tunned, delimiter=',')
         # Main data log:
         bg_pc_arr_cam = apply_transform_points(bgpts, T_inv)
-        colors = np.zeros_like(np.asarray(rd_pcd_cam.colors))
-        colors[:,0] = 1
+        points = np.asarray(rd_pcd_cam.points)
+        colors = np.zeros((points.shape[0], 3), dtype=np.float64)
+        colors[:, 0] = 1.0  # red
+
+        colors = o3d.utility.Vector3dVector(colors)
         mask = mask2image(bgmask, H, W)
         _bg_pcd = pcdArr2pcd(bg_pc_arr_cam, colors)
         _bg_mhw1 = pcd2hw1(_bg_pcd, H, W)

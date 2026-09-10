@@ -1,20 +1,37 @@
-## Major Job
+## USAGE
+
+```bash
+# -------------Step 0 - Prepare testcase
+python3 lib/postproc/base.py --name usegeo
+# move rgb, fill config.yaml and data.json
+
+# -------------Step 1 - Monocular depth estimation [out of this repo]
+python3 ml-depth/main.py -i data/usegeo/rgb -o data/usegeo/depth/depth_pro
+
+# -------------Step 2 - Project depth
+python3 launch/project.py --src data/usegeo/depth/depth_pro/ --dst test --save
+
+# -------------Step 3 - run diffusion
+python3 launch/diffuse.py --src data/usegeo/projection/test/radial/ --save
+python3 launch/diffuse.py --src data/usegeo/projection/test/canonical/ --save
+
+# -------------Step 4 - run fusion (geometry shape refinement and metric scale recovery)
+python3 launch/fuse.py --src data/usegeo/projection/test/radial/ --save
+
+# -------------Step 7 - run mapping
+python3 launch/map.py --src data/usegeo/fusion/test/fused/ --save
+
+```
+
+
+
+
 
 ```bash
 python3 launch/project.py --src data/bvc/depth/depth_pro/ --dst test --save --start 50
 python3 launch/diffuse.py --src data/bvc/projection/test/canonical/ --save --start 50
 ```
 
-### ORTHOLOC
-```bash
-# projection
-
-
-python3 lib/postproc/ortholoc1.py --raw data/ort/raw/ --out data/ort/
-python3 lib/postproc/ortholoc2.py --src data/ort/eval/gt/npz_ds/
-
-
-```
 ### USEGEO
 ```bash
 # -------------Step 1 - Post Process

@@ -142,13 +142,13 @@ class IOHandler:
         raise NotImplementedError("Subclasses must implement load_row()")
 
     def load(self):
-        if self.args.index:
+        if self.args.index is not None:
             row = self.df.loc[self.df["index"] == self.args.index].iloc[0]
             dic = self.load_row(row) 
             yield dic
 
         else:
-            if self.args.start:
+            if self.args.start is not None:
                 matches = self.df.index[self.df["index"] == self.args.start].tolist()
                 assert len(matches) > 0, f"Value {self.args.start} not found in 'index' column"
                 k = matches[0]

@@ -13,7 +13,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "lib"))
 
 from mapping.config import MappingConfig
+from mapping.geometry_viewer import load_geometry
 from mapping.mapper import IncrementalMapper
+from mapping.occupancy3d import FREE, KNOWN, OCCUPIED, OccupancyGrid3D
+from mapping.products import (
+    build_height_field_mesh,
+    build_rgb_map_2d,
+)
 from mapping.registration import (
     cv2,
     ground_plane_alignment,
@@ -22,6 +28,7 @@ from mapping.registration import (
     transform_points,
 )
 from mapping.types import FrameData
+from mapping.visualizer import MappingVisualizer
 from mapping.voxel_map import VoxelMap
 
 
@@ -84,6 +91,60 @@ class VoxelMapTests(unittest.TestCase):
         self.assertTrue(
             (voxel_map.state_arrays()["map_geom_weights"] <= 2.0).all()
         )
+
+
+class DerivedProductTests(unittest.TestCase):
+    def test_height_mesh_has_colored_triangles(self):
+        x, y = np.meshgrid(np.arange(4, dtype=float) + 0.1, np.arange(3, dtype=float) + 0.1)
+        points = np.column_stack((x.ravel(), y.ravel(), (0.1 * x + 0.2 * y).ravel()))
+        colors = np.tile([0.2, 0.4, 0.6], (len(points), 1))
+        mesh = build_height_field_mesh(points, colors, 1.0, 1.0)
+        self.assertEqual(len(mesh.vertices), 12)
+        self.assertEqual(len(mesh.triangles), 12)
+        self.assertTrue((mesh.colors == colors[0]).all())
+
+    def test_3d_occupancy_integrates_free_known_and_occupied(self):
+        grid = OccupancyGrid3D(1.0, max_rays_per_frame=20, max_ray_length=20.0)
+        update = grid.integrate(
+            np.array([0.1, 0.1, 0.1]),
+            np.array([[3.2, 0.1, 0.1]]),
+            confidence=1.0,
+            frame_index=0,
+        )
+        keys, states, _, _, _ = grid.to_arrays()
+        by_key = {tuple(key): state for key, state in zip(keys, states)}
+        self.assertGreater(update["free_updates"], 0)
+        self.assertEqual(by_key[(3, 0, 0)], OCCUPIED)
+        self.assertEqual(by_key[(1, 0, 0)], FREE)
+
+        uncertain = OccupancyGrid3D(1.0)
+        uncertain.integrate(
+            np.zeros(3), np.array([[2.2, 0.0, 0.0]]), 0.1, 1
+        )
+        uncertain_states = uncertain.to_arrays()[1]
+        self.assertIn(KNOWN, uncertain_states)
+
+    def test_rgb_map_selects_top_surface_and_mask(self):
+        points = np.array(
+            [[0.2, 0.2, 0.0], [0.3, 0.3, 2.0], [1.2, 0.2, 1.0]],
+            dtype=float,
+        )
+        colors = np.array(
+            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            dtype=float,
+        )
+        rgb_map = build_rgb_map_2d(points, colors, 1.0, padding=0.0)
+        pixel = rgb_map.world_to_pixel([[0.2, 0.2]])[0]
+        np.testing.assert_array_equal(
+            rgb_map.image_rgb[pixel[1], pixel[0]], [0, 255, 0]
+        )
+        self.assertEqual(rgb_map.mask[pixel[1], pixel[0]], 255)
+
+    def test_disabled_visualizer_never_blocks(self):
+        viewer = MappingVisualizer(False)
+        self.assertTrue(viewer.wait_for_advance(0, "frame"))
+        viewer.update(np.empty((0, 3)), np.empty((0, 3)), "test")
+        viewer.finish()
 
 
 @unittest.skipIf(o3d is None, "Open3D is not installed")
@@ -163,7 +224,11 @@ class CommandLineSmokeTests(unittest.TestCase):
             height, width = 72, 96
             x, y = np.meshgrid(np.linspace(-12, 12, width), np.linspace(-9, 9, height))
             world = np.column_stack(
-                (x.ravel(), y.ravel(), (0.5 * np.sin(x / 2.5) + 0.2 * np.cos(y / 2)).ravel())
+                (
+                    x.ravel(),
+                    y.ravel(),
+                    (-8.0 + 0.5 * np.sin(x / 2.5) + 0.2 * np.cos(y / 2)).ravel(),
+                )
             )
             rng = np.random.default_rng(23)
             image = rng.integers(0, 256, size=(height, width, 3), dtype=np.uint8)
@@ -229,6 +294,7 @@ class CommandLineSmokeTests(unittest.TestCase):
                 "--src",
                 str(fused_dir),
                 "--save",
+                "--loop-closure",
             ]
             completed = subprocess.run(
                 command,
@@ -236,7 +302,7 @@ class CommandLineSmokeTests(unittest.TestCase):
                 env=environment,
                 text=True,
                 capture_output=True,
-                timeout=120,
+                timeout=240,
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             output = dataset / "mapping" / "test"
@@ -245,11 +311,84 @@ class CommandLineSmokeTests(unittest.TestCase):
                 (output / "reports" / f"000007_{names[-1]}.json").read_text(encoding="utf-8")
             )
             mapped = o3d.io.read_point_cloud(str(output / "map.pcd"))
+            mesh = o3d.io.read_triangle_mesh(str(output / "map_mesh.ply"))
+            occupancy = np.load(output / "occupancy" / "occupancy_grid_3d.npz")
+            occupancy_cloud = o3d.io.read_point_cloud(
+                str(output / "occupancy" / "occupancy_grid_3d.pcd")
+            )
+            comparison = json.loads(
+                (output / "optimized" / "comparison.json").read_text(encoding="utf-8")
+            )
             self.assertEqual(summary["frames_accepted"], 8)
             self.assertTrue(report["accepted"], report["message"])
             self.assertTrue(report["visual"]["success"])
+            self.assertGreater(report["mesh"]["triangles"], 100)
+            self.assertGreater(report["occupancy"]["observed_voxels"], 1)
             self.assertEqual(len(list((output / "steps").glob("*.pcd"))), 8)
+            self.assertFalse((output / "mesh_steps").exists())
+            self.assertFalse((output / "occupancy" / "steps").exists())
+            self.assertFalse((output / "map_2d" / "steps").exists())
             self.assertGreater(len(mapped.points), 500)
+            self.assertGreater(len(mesh.triangles), 100)
+            self.assertTrue(
+                set(np.unique(occupancy["occupancy3d_states"])).issubset({0, 50, 100})
+            )
+            self.assertTrue((output / "occupancy" / "occupancy_grid_3d.pcd").is_file())
+            self.assertGreater(len(occupancy_cloud.points), 1)
+            self.assertTrue(occupancy_cloud.has_colors())
+            self.assertTrue((output / "map_2d" / "map_rgb.png").is_file())
+            self.assertTrue((output / "map_2d" / "map_mask.png").is_file())
+            self.assertTrue((output / "map_2d" / "map_trajectory.png").is_file())
+            self.assertTrue((output / "trajectory.ply").is_file())
+            timings = [
+                json.loads(line)
+                for line in (output / "timings.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            timing_summary = json.loads(
+                (output / "timing_summary.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(timings), 8)
+            self.assertEqual(timing_summary["frames"]["frame_count"], 8)
+            self.assertGreater(timing_summary["overall_work_total_seconds"], 0.0)
+            self.assertTrue(all(item["mapping_seconds"] > 0.0 for item in timings))
+            self.assertTrue(all(item["checkpoint_saving_seconds"] > 0.0 for item in timings))
+            self.assertEqual(completed.stdout.count("[timing] frame "), 8)
+            self.assertEqual(len(list((output / "reports" / "geometry").glob("*_geometry.json"))), 8)
+            visual_matches = list(
+                (output / "reports" / "visual").glob("*_matches.png")
+            )
+            self.assertGreaterEqual(len(visual_matches), 7)
+            match_image = cv2.imread(str(visual_matches[0]), cv2.IMREAD_COLOR)
+            self.assertIsNotNone(match_image)
+            self.assertGreater(match_image.shape[1], width)
+            mask_overlays = list(
+                (output / "reports" / "visual").glob("*_mask_overlay.png")
+            )
+            self.assertGreaterEqual(len(mask_overlays), 7)
+            self.assertGreater(
+                np.count_nonzero(cv2.imread(str(mask_overlays[0]), cv2.IMREAD_COLOR)),
+                0,
+            )
+            self.assertTrue((output / "optimized" / "map.pcd").is_file())
+            self.assertTrue((output / "optimized" / "occupancy_grid_3d.pcd").is_file())
+            self.assertTrue((output / "optimized" / "pose_graph.json").is_file())
+            self.assertGreaterEqual(comparison["candidate_loops"], 1)
+            self.assertGreaterEqual(comparison["accepted_loops"], 1)
+            self.assertTrue(comparison["loop_residual_improved"])
+
+            voxel_geometry, voxel_mode = load_geometry(
+                output / "occupancy" / "occupancy_grid_3d.pcd"
+            )
+            mesh_geometry, mesh_mode = load_geometry(output / "map_mesh.ply")
+            trajectory_geometry, trajectory_mode = load_geometry(
+                output / "trajectory.ply"
+            )
+            self.assertEqual(voxel_mode, "voxel grid (1 m cubes)")
+            self.assertGreater(len(voxel_geometry[0].get_voxels()), 1)
+            self.assertEqual(mesh_mode, "triangle mesh")
+            self.assertGreater(len(mesh_geometry[0].triangles), 100)
+            self.assertEqual(trajectory_mode, "trajectory lines")
+            self.assertGreater(len(trajectory_geometry[0].lines), 0)
 
 
 if __name__ == "__main__":

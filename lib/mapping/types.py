@@ -9,6 +9,7 @@ class FeatureSet:
     points_xy: np.ndarray
     descriptors: Optional[np.ndarray]
     image_shape: Tuple[int, int]
+    points_3d: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -33,8 +34,13 @@ class Keyframe:
     position_utm: np.ndarray
     relative_position: np.ndarray
     points: np.ndarray
+    colors: Optional[np.ndarray]
+    image: Optional[np.ndarray]
+    image_path: Optional[str]
+    ground_points: Optional[np.ndarray]
     transform: np.ndarray
     features: Optional[FeatureSet]
+    confidence: float = 1.0
 
 
 @dataclass
@@ -53,6 +59,10 @@ class FrameResult:
     visual: Dict[str, Any] = field(default_factory=dict)
     ground: Dict[str, Any] = field(default_factory=dict)
     geometry: Dict[str, Any] = field(default_factory=dict)
+    mesh: Dict[str, Any] = field(default_factory=dict)
+    occupancy: Dict[str, Any] = field(default_factory=dict)
+    map_2d: Dict[str, Any] = field(default_factory=dict)
+    timing: Dict[str, float] = field(default_factory=dict)
     map_voxels: int = 0
     message: str = ""
 

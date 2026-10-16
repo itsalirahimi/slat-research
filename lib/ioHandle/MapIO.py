@@ -55,6 +55,64 @@ class MapIO:
             help="Maximum prior keyframes tested visually per frame",
         )
         parser.add_argument("--seed", type=int, help="Deterministic RANSAC seed")
+        parser.add_argument(
+            "--visualize",
+            action="store_true",
+            help="Open the cumulative-map viewer; press A for each frame and Q to quit",
+        )
+        parser.add_argument(
+            "--no-mesh", action="store_true", help="Do not write cumulative PLY meshes"
+        )
+        parser.add_argument(
+            "--save-derived-steps",
+            action="store_true",
+            help=(
+                "Also save mesh, occupancy, and RGB-map products after every frame "
+                "(slower; cumulative PCD checkpoints are always saved with --save)"
+            ),
+        )
+        parser.add_argument(
+            "--no-occupancy",
+            action="store_true",
+            help="Do not generate the sparse probabilistic 3D occupancy grid",
+        )
+        parser.add_argument(
+            "--occupancy-voxel-size",
+            "--occupancy-resolution",
+            dest="occupancy_voxel_size",
+            type=float,
+            help="Sparse 3D occupancy voxel size in meters",
+        )
+        parser.add_argument(
+            "--occupancy-max-rays",
+            type=int,
+            help="Maximum unique endpoint rays integrated per frame",
+        )
+        parser.add_argument(
+            "--no-map-2d",
+            action="store_true",
+            help="Do not write the orthographic RGB/mask map",
+        )
+        parser.add_argument(
+            "--map-2d-resolution",
+            type=float,
+            help="Orthographic RGB map pixel size in meters",
+        )
+        parser.add_argument(
+            "--no-diagnostics",
+            action="store_true",
+            help="Do not save visual match/overlay and geometry diagnostic files",
+        )
+        parser.add_argument(
+            "--loop-closure",
+            action="store_true",
+            help="Also build optimized/ using verified loops and global pose optimization",
+        )
+        parser.add_argument(
+            "--loop-search-radius",
+            type=float,
+            help="Maximum camera-center distance for loop candidates in meters",
+        )
         self.args = parser.parse_args()
 
         self.source_dir = self.args.src.expanduser().resolve()
@@ -97,6 +155,9 @@ class MapIO:
     def getDoSave(self) -> bool:
         return bool(self.args.save)
 
+    def getVisualize(self) -> bool:
+        return bool(self.args.visualize)
+
     def mapping_options(self) -> Dict:
         options = dict(self.cfg.get("mapping", {}) or {})
         cli_values = {
@@ -104,12 +165,28 @@ class MapIO:
             "voxel_size": self.args.voxel_size,
             "max_keyframe_candidates": self.args.max_keyframes,
             "random_seed": self.args.seed,
+            "occupancy_voxel_size": self.args.occupancy_voxel_size,
+            "occupancy_max_rays_per_frame": self.args.occupancy_max_rays,
+            "map_2d_resolution": self.args.map_2d_resolution,
+            "loop_search_radius": self.args.loop_search_radius,
         }
         options.update({key: value for key, value in cli_values.items() if value is not None})
         if self.args.no_visual:
             options["use_visual"] = False
         if self.args.no_ground:
             options["use_ground"] = False
+        if self.args.no_mesh:
+            options["save_mesh"] = False
+        if self.args.save_derived_steps:
+            options["save_derived_steps"] = True
+        if self.args.no_occupancy:
+            options["save_occupancy"] = False
+        if self.args.no_map_2d:
+            options["save_map_2d"] = False
+        if self.args.no_diagnostics:
+            options["save_diagnostics"] = False
+        if self.args.loop_closure:
+            options["run_loop_closure"] = True
         return options
 
     def _selected_rows(self) -> Iterable[Dict]:

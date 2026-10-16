@@ -1,5 +1,7 @@
 import os
 import sys
+
+from projection.config import ScaleMode
 dir_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(dir_path + "/..")
 import numpy as np
@@ -68,16 +70,20 @@ def calcCameraDirs(shape, hfov_deg, pyramidProj, pose, do_rotate):
         return dirs
 
 def project3D(depth_img, pose, hfov_deg, bg=None, 
-              move=False, pyramidProj=False, do_rotate=True, do_scale=True):
+              move=False, pyramidProj=False, do_rotate=True, scale_mode=ScaleMode.Normalized):
     dirs = calcCameraDirs(depth_img.shape, hfov_deg, pyramidProj, pose, do_rotate)
     # Scale by depth and altitude
     pc = dirs * (depth_img[..., np.newaxis])
-    # if do_rotate:
-    #     sgn = -1
-    # else:
-    #     sgn = 1
-    if do_scale:
+
+    if scale_mode == ScaleMode.Raw:
+        pc = pc
+        print("ScaleMode.Raw")
+    elif scale_mode == ScaleMode.Normalized:
         pc = scale_pcm(pc, np.nanmin(pc[:,:,2]), NULL_SCALE_MIN_Z)
+        print("ScaleMode.Normalized")
+    elif scale_mode == ScaleMode.Corrected:
+        pc = scale_pcm(pc, np.nanmin(pc[:,:,2]), -pose.p6.z)
+        print("ScaleMode.Corrected", -pose.p6.z)
     
     if move:
         pose = np.array([[pose.p6.x], [pose.p6.y], [pose.p6.z]])

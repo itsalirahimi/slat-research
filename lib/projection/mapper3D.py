@@ -57,11 +57,13 @@ class Mapper3D(O3DGUI):
         _filename_canonical = os.path.join(self.config.canonical_dir, f"{filename}.pcd")
         _filename_imgds = os.path.join(self.config.rgb_dir, f"{filename}.png")
         _filename_mdepthds = os.path.join(self.config.mdepth_dir, f"{filename}.npy")
+        _filename_rdepthds = os.path.join(self.config.rdepth_dir, f"{filename}.npy")
         if self.config.do_save:
             save_pcd(np.asarray(_pcd.points), np.asarray(_pcd.colors), filepath=_filename_radial)
             save_pcd(np.asarray(_pcd_c.points), np.asarray(_pcd_c.colors), filepath=_filename_canonical)
             cv2.imwrite(_filename_imgds, cimg_ds)
             np.save(_filename_mdepthds, _depthcan_mhw1)
+            np.save(_filename_rdepthds, metric_depth_ds)
 
             print(f"Wrote pcd file on {_filename_radial}")
 

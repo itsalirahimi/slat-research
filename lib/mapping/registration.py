@@ -195,6 +195,10 @@ def match_sift_features(
     result: Dict[str, Any] = {
         "source_indices": np.empty(0, dtype=np.int64),
         "target_indices": np.empty(0, dtype=np.int64),
+        "all_source_indices": np.empty(0, dtype=np.int64),
+        "all_target_indices": np.empty(0, dtype=np.int64),
+        "ransac_2d_mask": np.empty(0, dtype=bool),
+        "homography": None,
         "matches": 0,
         "ransac_2d_inliers": 0,
         "model": "none",
@@ -213,6 +217,8 @@ def match_sift_features(
 
     source_indices = np.asarray([item[0] for item in mutual], dtype=np.int64)
     target_indices = np.asarray([item[1] for item in mutual], dtype=np.int64)
+    result["all_source_indices"] = source_indices
+    result["all_target_indices"] = target_indices
     source_xy = source.points_xy[source_indices]
     target_xy = target.points_xy[target_indices]
 
@@ -239,9 +245,17 @@ def match_sift_features(
     if not candidates:
         return result
     model, keep = max(candidates, key=lambda item: int(item[1].sum()))
+    homography = None
+    if int(keep.sum()) >= 4:
+        try:
+            homography, _ = cv2.findHomography(source_xy[keep], target_xy[keep], 0)
+        except cv2.error:
+            homography = None
     result.update(
         source_indices=source_indices[keep],
         target_indices=target_indices[keep],
+        ransac_2d_mask=keep,
+        homography=homography,
         ransac_2d_inliers=int(keep.sum()),
         model=model,
     )
@@ -293,10 +307,24 @@ def visual_registration(
     }
     if source_features is None or target_features is None:
         return report
-    if len(source_ordered_points) != np.prod(source_features.image_shape):
+    source_has_lifted = (
+        source_features.points_3d is not None
+        and len(source_features.points_3d) == len(source_features.points_xy)
+    )
+    target_has_lifted = (
+        target_features.points_3d is not None
+        and len(target_features.points_3d) == len(target_features.points_xy)
+    )
+    source_organized = len(source_ordered_points) == np.prod(
+        source_features.image_shape
+    )
+    target_organized = len(target_ordered_points) == np.prod(
+        target_features.image_shape
+    )
+    if not source_has_lifted and not source_organized:
         report["reason"] = "source_cloud_not_image_organized"
         return report
-    if len(target_ordered_points) != np.prod(target_features.image_shape):
+    if not target_has_lifted and not target_organized:
         report["reason"] = "target_cloud_not_image_organized"
         return report
 
@@ -306,6 +334,16 @@ def visual_registration(
         ransac_2d_inliers=matches["ransac_2d_inliers"],
         model=matches["model"],
     )
+    all_source = matches["all_source_indices"]
+    all_target = matches["all_target_indices"]
+    if len(all_source):
+        diagnostics = {
+            "source_xy": source_features.points_xy[all_source],
+            "target_xy": target_features.points_xy[all_target],
+            "inlier_mask": matches["ransac_2d_mask"],
+            "homography": matches["homography"],
+        }
+        report["_diagnostics"] = diagnostics
     source_feature_indices = matches["source_indices"]
     target_feature_indices = matches["target_indices"]
     if len(source_feature_indices) < 3:
@@ -314,15 +352,35 @@ def visual_registration(
 
     source_xy = source_features.points_xy[source_feature_indices]
     target_xy = target_features.points_xy[target_feature_indices]
-    source_point_indices, source_valid = _pixel_indices(
-        source_xy, source_features.image_shape
-    )
-    target_point_indices, target_valid = _pixel_indices(
-        target_xy, target_features.image_shape
-    )
+    if source_has_lifted:
+        source_3d_all = np.asarray(source_features.points_3d, dtype=np.float64)[
+            source_feature_indices
+        ]
+        source_valid = np.ones(len(source_xy), dtype=bool)
+    else:
+        source_point_indices, source_valid = _pixel_indices(
+            source_xy, source_features.image_shape
+        )
+        source_3d_all = np.full((len(source_xy), 3), np.nan, dtype=np.float64)
+        source_3d_all[source_valid] = np.asarray(source_ordered_points)[
+            source_point_indices[source_valid]
+        ]
+    if target_has_lifted:
+        target_3d_all = np.asarray(target_features.points_3d, dtype=np.float64)[
+            target_feature_indices
+        ]
+        target_valid = np.ones(len(target_xy), dtype=bool)
+    else:
+        target_point_indices, target_valid = _pixel_indices(
+            target_xy, target_features.image_shape
+        )
+        target_3d_all = np.full((len(target_xy), 3), np.nan, dtype=np.float64)
+        target_3d_all[target_valid] = np.asarray(target_ordered_points)[
+            target_point_indices[target_valid]
+        ]
     valid = source_valid & target_valid
-    source_3d = np.asarray(source_ordered_points)[source_point_indices[valid]]
-    target_3d = np.asarray(target_ordered_points)[target_point_indices[valid]]
+    source_3d = source_3d_all[valid]
+    target_3d = target_3d_all[valid]
     finite = np.isfinite(source_3d).all(axis=1) & np.isfinite(target_3d).all(axis=1)
     source_3d = transform_points(source_3d[finite], source_initial_transform)
     target_3d = transform_points(target_3d[finite], target_transform)
